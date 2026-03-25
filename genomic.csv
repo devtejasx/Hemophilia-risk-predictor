@@ -1,0 +1,6 @@
+patient_id,mutation_type,exon,severity,target
+1,intron22,22,severe,1
+2,nonsense,14,moderate,0
+3,frameshift,8,severe,1
+4,missense,5,mild,0
+5,intron22,22,severe,12

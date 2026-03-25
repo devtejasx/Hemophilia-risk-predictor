@@ -1,0 +1,6 @@
+patient_id,age_first_treatment,dose_intensity,exposure_days
+1,1,90,15
+2,5,40,50
+3,2,80,20
+4,10,30,100
+5,1,95,10
