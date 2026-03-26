@@ -16,7 +16,7 @@ exposure = st.sidebar.slider("Exposure Days", 0, 100)
 # Button
 if st.sidebar.button("Predict"):
 
-    url = "http://127.0.0.1:8000/predict"
+    url = "https://hemophilia-api.onrender.com/predict"
     params = {"age": age, "dose": dose, "exposure": exposure}
 
     response = requests.get(url, params=params)
