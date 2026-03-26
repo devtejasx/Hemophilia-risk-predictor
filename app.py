@@ -163,15 +163,44 @@ if predict_btn:
         })
 
         # ---------------- CHATBOT ----------------
-        st.markdown("### 🤖 Ask AI Assistant")
+        elif page == "Chatbot":
+
+    st.title("🤖 AI Medical Assistant")
+
+    if "data" not in st.session_state:
+        st.warning("Run prediction first")
+    else:
+        d = st.session_state.data
 
         question = st.text_input("Ask about patient condition")
 
         if question:
-            if risk > 0.6:
-                st.write("This patient is at high risk. Immediate monitoring and specialist consultation are strongly recommended.")
-            else:
-                st.write("This patient is at low risk. Continue regular treatment and periodic monitoring.")
+
+            prompt = f"""
+            You are a medical assistant.
+
+            Patient details:
+            Risk: {d['risk']}
+            Severity: {d['severity']}
+            Mutation: {d['mutation']}
+            Reason: {d['reason']}
+
+            Question: {question}
+
+            Give a detailed, helpful, medical explanation in simple language.
+            """
+
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4.1-mini",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                answer = response.choices[0].message.content
+                st.write(answer)
+
+            except Exception as e:
+                st.error(f"Error: {e}")
 
         # ---------------- PATIENT HISTORY ----------------
         st.markdown("### 📂 Patient History")
