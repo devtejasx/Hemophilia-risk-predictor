@@ -2,7 +2,7 @@ services:
   - type: web
     name: hemophilia-clinician-ai
     runtime: python312
-    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    buildCommand: "bash build.sh"
     startCommand: "streamlit run app.py --server.port=$PORT --server.headless=true --server.enableCORS=false"
     envVars:
       - key: OPENAI_API_KEY
@@ -12,3 +12,4 @@ services:
     routes:
       - type: http
         path: /
+
