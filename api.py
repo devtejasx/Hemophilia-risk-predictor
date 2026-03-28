@@ -3,13 +3,23 @@ import joblib
 import pandas as pd
 import shap
 import numpy as np
+import pickle
 
 app = FastAPI()
 
 # Load models
 rf = joblib.load("rf.pkl")
 xgb = joblib.load("xgb.pkl")
-columns = joblib.load("columns.pkl")
+# Load columns with memory-safe approach
+try:
+    columns = joblib.load("columns.pkl", mmap_mode='r')
+except (MemoryError, EOFError, pickle.UnpicklingError):
+    try:
+        # Try without mmap if mmap fails
+        columns = joblib.load("columns.pkl")
+    except Exception as e:
+        print(f"Error loading columns: {e}. Using fallback.")
+        columns = None
 
 explainer = shap.TreeExplainer(rf)
 

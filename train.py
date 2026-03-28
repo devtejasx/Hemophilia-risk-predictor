@@ -36,6 +36,6 @@ xgb.fit(X, y)
 joblib.dump(rf, "rf.pkl")
 joblib.dump(xgb, "xgb.pkl")
 
-joblib.dump(X.columns, "columns.pkl")
+joblib.dump(list(X.columns), "columns.pkl")
 
 print("✅ Model trained successfully!")

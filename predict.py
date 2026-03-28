@@ -1,5 +1,6 @@
 import joblib
 import pandas as pd
+import pickle
 
 # Load models
 rf = joblib.load("rf.pkl")
@@ -22,7 +23,16 @@ df = pd.DataFrame([new_data])
 df = pd.get_dummies(df)
 
 # IMPORTANT: Align columns (missing columns = 0)
-train_columns = joblib.load("columns.pkl")
+# Load columns with memory-safe approach
+try:
+    train_columns = joblib.load("columns.pkl", mmap_mode='r')
+except (MemoryError, EOFError, pickle.UnpicklingError):
+    try:
+        # Try without mmap if mmap fails
+        train_columns = joblib.load("columns.pkl")
+    except Exception as e:
+        print(f"Error loading columns: {e}. Using fallback.")
+        train_columns = None
 
 for col in train_columns:
     if col not in df:

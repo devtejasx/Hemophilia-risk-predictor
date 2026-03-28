@@ -1,2 +1,3 @@
 Name,Age,Gender,Ethnicity,Severity,Mutation,Blood_Type,HLA_Type,Dose,Exposure,Product_Type,Treatment_Adherence,Family_History,Previous_Inhibitor,Joint_Damage,Bleeding_Episodes,Factor_Level,Immunosuppression,Active_Infection,Vaccination_Status,Physical_Activity,Stress_Level,Comorbidities,Risk_Score
 tejas,5,Male,Asian,Moderate,Missense,A,High Risk,14,11,Plasma-Derived,7,Yes,Yes,10,5,15,Moderate,Moderate,Partial,Sedentary,Low,None,0.18643520280718803
+dipak,5,Male,Asian,Moderate,Missense,A,Moderate,11,23,Plasma-Derived,11,Yes,Yes,17,4,7,Mild,Moderate,Partial,Light,Moderate,"None, Kidney Disease, Hepatitis C",0.2550403785705566

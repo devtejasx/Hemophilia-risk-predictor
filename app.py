@@ -7,22 +7,67 @@ import joblib
 import numpy as np
 import shap
 import warnings
+import pickle
 from datetime import datetime
+import os
+
+# Try to load environment variables from .env file (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, continue without it
+
 warnings.filterwarnings('ignore')
 
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+
+# Import custom modules
+from database import (
+    init_database, add_patient, get_patient, get_all_patients,
+    add_conversation, get_conversation_history, add_doctor_note,
+    get_doctor_notes, get_dashboard_stats, search_patients,
+    update_patient, delete_patient, add_monitoring_record,
+    get_monitoring_records, add_treatment_record, get_treatment_history
+)
+from gpt_chatbot import (
+    create_gpt_response, get_clinical_recommendations,
+    analyze_monitoring_data, generate_inhibitor_risk_explanation
+)
+
+# Initialize database at startup
+try:
+    init_database()
+except Exception as e:
+    st.error(f"Database initialization error: {e}")
 
 # Load trained models locally
 @st.cache_resource
 def load_models():
     """Load trained models and preprocessor"""
     try:
-        rf_model = joblib.load("rf.pkl")
-        xgb_model = joblib.load("xgb.pkl")
-        columns = joblib.load("columns.pkl")
+        # Use mmap_mode to handle large files without loading fully into memory
+        rf_model = joblib.load("rf.pkl", mmap_mode='r')
+        xgb_model = joblib.load("xgb.pkl", mmap_mode='r')
+        
+        # Load columns - use try/except for memory error
+        try:
+            columns = joblib.load("columns.pkl", mmap_mode='r')
+        except (MemoryError, EOFError, pickle.UnpicklingError):
+            # If pickle is corrupted, try without mmap
+            try:
+                columns = joblib.load("columns.pkl")
+            except:
+                # Fallback: create default columns from training data
+                columns = None
+        
         return rf_model, xgb_model, columns
-    except:
+    except MemoryError:
+        st.error("❌ Memory Error: Unable to load models. Try closing other applications or restarting Streamlit.")
+        return None, None, None
+    except Exception as e:
+        st.error(f"❌ Error loading models: {str(e)[:100]}")
         return None, None, None
 
 # Prediction function using real trained models
@@ -1342,7 +1387,7 @@ with col2:
 st.divider()
 
 # ---------------- NAV ----------------
-nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
+nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns(5)
 
 with nav_col1:
     if st.session_state.get("current_page") != "Patient Form":
@@ -1375,6 +1420,14 @@ with nav_col4:
             st.rerun()
     else:
         st.button("🤖 Chatbot", use_container_width=True, disabled=True)
+
+with nav_col5:
+    if st.session_state.get("current_page") != "Doctor Dashboard":
+        if st.button("🏥 Dashboard", use_container_width=True):
+            st.session_state.current_page = "Doctor Dashboard"
+            st.rerun()
+    else:
+        st.button("🏥 Dashboard", use_container_width=True, disabled=True)
 
 st.divider()
 
@@ -2295,427 +2348,378 @@ Feel free to rephrase your question or ask me about a hemophilia topic I can hel
             # Rerun to display new message
             st.rerun()
 
-# ============= END OF ADVANCED CHATBOT =============
-                    response = f"""This patient carries **HIGH risk** ({risk:.1%}) for developing inhibitors - something we take seriously.
 
-**Risk profile:**
-The primary driver is **{main_factor}**, which when combined with {severity} hemophilia and {mutation} mutations creates a concerning scenario. The dose regimen ({dose} units) and treatment exposure ({exposure} days) compound this risk.
+# ============= CHATBOT PAGE WITH REAL GPT-4 =============
+elif page == "Chatbot":
 
-**Clinical implications:**
-- 60% chance of inhibitor formation
-- Requires aggressive monitoring and surveillance
-- Prophylactic strategies become critical
-- Early intervention is key to preservation of normal factor response
+    st.title("🤖 AI Medical Assistant - GPT-4 Powered")
 
-**Recommended approach:**
-- Specialist hematologist oversight
-- Regular inhibitor screening (every 4-6 weeks)
-- Maintain detailed exposure logs
-- Consider adjunctive immune support
-- Family education on inhibitor symptoms
-
-Early and aggressive management at this risk level can substantially improve outcomes."""
-                
-                else:
-                    response = f"""This patient is at **MANAGEABLE risk** ({risk:.1%}) for inhibitor development, which is encouraging.
-
-**Risk breakdown:**
-While {severity} hemophilia with {mutation} mutations creates baseline risk, the overall profile suggests favorable outcomes with standard management. The current dose ({dose} units) and exposure ({exposure} days) are well-controlled relative to the risk factors.
-
-**What to do:**
-- Continue standard prophylactic therapy
-- Routine monitoring (quarterly inhibitor screening)
-- Maintain good medication adherence
-- Regular hematology follow-up
-- Annual risk reassessment
-
-The key is consistency - regular treatment and monitoring help prevent the small possibility of inhibitor development. This patient should do well with standard care protocols."""
-            
-            elif detected_intent == "treatment":
-                response = f"""Let me explain the treatment approach for this {severity} hemophilia patient.
-
-**Current Treatment Plan:**
-- **Dose:** {dose} units of factor
-- **Severity:** {severity} hemophilia
-- **Strategy:** Based on severity, we recommend:
-
-"""
-                if severity == "Severe":
-                    response += """**Prophylactic Therapy** (continuous prevention)
-- Dosing: Typically 25-40 IU/kg every 2-3 days
-- Goal: Keep factor levels >1% at all times
-- This prevents spontaneous bleeds and target joint damage
-- Extended half-life (EHL) factors reduce infusion burden
-
-Key advantage: Prevents bleeding before it starts, better long-term outcomes."""
-                
-                elif severity == "Moderate":
-                    response += """**Individualized Approach** (flexible management)
-- Can use either prophylactic OR on-demand therapy
-- Decision based on individual bleeding pattern
-- Some may need episodic dosing, others prophylaxis
-- Reassess regularly
-
-Key advantage: Tailored to patient's specific needs."""
-                
-                elif severity == "Mild":
-                    response += """**On-Demand Therapy** (treat after bleeding)
-- 15-25 IU/kg per bleeding episode
-- Fast response is critical
-- Some patients benefit from prophylaxis if frequent bleeds
-- Home infusion training usually sufficient
-
-Key advantage: Minimal treatment burden."""
-                
-                response += f"""
-
-**Factor Product Selection:**
-You might use recombinant (engineered in labs) or plasma-derived (from human plasma) factors. Given the risk profile, we might recommend:
-- **Recombinant factors**: Lower infection risk, consistent supply
-- **Extended half-life factors**: Less frequent dosing
-- **Novel alternatives like Emicizumab**: Subcutaneous, bypass mechanism
-
-**Special considerations for this patient:**
-At risk level {risk:.1%}, we'll pay special attention to product selection and may need to coordinate with specialists on optimal strategy.
-
-The goal is preventing both spontaneous bleeding AND inhibitor development."""
-            
-            elif detected_intent == "monitoring":
-                response = f"""Great question - monitoring is crucial for {severity} hemophilia management.
-
-**For this high-risk patient ({risk:.1%}), here's what surveillance looks like:**
-
-**Lab Tests:**
-- **Inhibitor Screening**: Every 2-4 weeks (Bethesda assay)
-- **Factor Level Assays**: Monthly to track therapy effectiveness
-- **Coagulation Profile**: PT, PTT, fibrinogen regularly
-- **Immune Assessment**: Periodic T-cell and B-cell markers to detect early immune changes
-
-**Clinical Evaluations:**
-- Physical exams every 1-3 months depending on risk
-- Bleeding pattern documentation (bleeding diary)
-- Joint assessments for early arthropathy
-- Imaging (ultrasound/MRI) if joints affected
-
-**Timeline:**
-- **Months 0-1**: Weekly clinical contact, baseline labs
-- **Months 1-12**: Monthly inhibitor screens, quarterly comprehensive exam
-- **Year 2+**: Adjust frequency based on response
-
-**Red flags requiring immediate attention:**
-- Unusual bleeding or prolonged oozing
-- Joint pain with swelling
-- Factor infusion doesn't stop bleeding (possible inhibitor)
-- Fever or other systemic symptoms
-
-The intensive monitoring catches problems early when treatment is most effective."""
-            
-            elif detected_intent == "mutation":
-                response = f"""Excellent question about genetics - this is important for understanding prognosis.
-
-**This patient has a {mutation} mutation.**
-
-"""
-                if mutation == "Intron22":
-                    response += """**What is Intron22?**
-It's the most common mutation type in severe hemophilia A (~45% of cases), caused by an inversion in intron 22 of the Factor VIII gene.
-
-**Clinical significance:**
-- **Highest inhibitor risk**: 50% of patients develop inhibitors (you can see why we're concerned!)
-- The inversion disrupts normal factor VIII production
-- Clear genetic mechanism makes it treatable but requires vigilance
-- Well-understood in research, but serious implications
-
-**Why is it so risky?**
-The inverted DNA sequence creates an abnormal protein structure that the immune system recognizes as "foreign" more readily. Plus, Intron22 mutations tend to cluster - they're the most immunogenic.
-
-**Family implications:**
-- X-linked inheritance (males severely affected, females are carriers)
-- 50% of sons of carrier mothers will be affected
-- Genetic counseling highly recommended
-- Prenatal testing available for future pregnancies
-
-**Management approach:**
-- More aggressive prophylaxis needed
-- Earlier immune tolerance therapy if inhibitor develops
-- Genetic counseling for family planning essential"""
-                
-                elif mutation == "Missense":
-                    response += """**What is Missense?**
-It's a point mutation that changes one amino acid in the Factor VIII protein, accounting for ~25% of mutations.
-
-**Clinical significance:**
-- **Moderate inhibitor risk**: 10-30% depending on exact location
-- The protein is made but with altered function
-- Risk varies based on which amino acid is altered
-- Some residual clotting activity may remain
-
-**Why it matters:**
-Missense mutations create a "defective" but partially functional protein that the immune system sometimes tolerates and sometimes attacks - hence the variable risk.
-
-**Management approach:**
-- Standard prophylactic therapy usually sufficient
-- Regular inhibitor monitoring essential
-- Better prognosis than Intron22 mutations
-- Genetic counseling still recommended
-
-**Family implications:**
-- Same X-linked pattern as Intron22
-- Genetic testing can predict severity in relatives"""
-                
-                elif mutation == "Nonsense":
-                    response += """**What is Nonsense?**
-It's a mutation that creates a "stop sign" in the genetic code, producing a truncated (incomplete) Factor VIII protein. Accounts for ~10% of mutations.
-
-**Clinical significance:**
-- **Moderate inhibitor risk**: 10-20%
-- No functional protein is produced
-- Immune system recognizes it as completely foreign
-- Typically causes severe disease
-
-**Why it matters:**
-Since there's no normal-looking protein at all, the immune system may either ignore it or mount attacks - creating a medium range of inhibitor risk.
-
-**Management approach:**
-- Prophylactic therapy important
-- Regular monitoring for inhibitor development
-- Good prognosis with adherent therapy
-- Genetic counseling for family members
-
-**Family implications:**
-- X-linked inheritance
-- All sons of affected mothers will be affected
-- Daughters of affected fathers will be carriers"""
-                
-                response += f"""
-
-**Bottom line for this patient:**
-The {mutation} mutation means their genetic predisposition for inhibitors is significant. Combined with the other risk factors (dose {dose}, exposure {exposure} days), this explains the {risk:.1%} risk score. Close monitoring and prophylaxis aren't optional - they're essential to preserve normal factor response."""
-            
-            elif detected_intent == "exposure":
-                response = f"""Let me explain the significance of {exposure} treatment days of exposure.
-
-**What does 'exposure' mean?**
-Each time we give factor replacement, we're exposing the immune system to a foreign protein. The more exposures, the more opportunity for the immune system to develop an allergic/antibody response (inhibitor).
-
-**Your patient's exposure level:**
-"""
-                if exposure < 5:
-                    response += f"""{exposure} days is **VERY EARLY** in treatment.
-
-This is the **criticality window** - the first 5 exposures carry the highest immune sensitization risk. About 60% of inhibitors develop within the first 20 exposures.
-
-**What to do:**
-- Take extra care with product selection (some may be more immunogenic)
-- Document everything meticulously
-- Consider immune-modulating strategies
-- Baseline immune assessment important
-- Patient education about inhibitor symptoms
-
-This early point is when prevention is most impactful."""
-                
-                elif exposure < 20:
-                    response += f"""{exposure} days is in the **HIGH-RISK PERIOD**.
-
-Statistics show ~80% of inhibitors form before day 20. This is when we're most vigilant about monitoring and immune management.
-
-**Critical actions:**
-- Intensive inhibitor monitoring (every 1-2 weeks)
-- Immune panel assessment
-- Consider specialist involvement
-- Maintain excellent compliance
-- Patient and family education
-
-We're in the window where prevention pays off biggest."""
-                
-                elif exposure < 50:
-                    response += f"""{exposure} days means past the highest-risk period, but still monitoring.
-
-About 95% of inhibitors are identified by 50 exposures. The risk decreases statistically but remains important.
-
-**Continue:**
-- Regular inhibitor screening (every 3-4 weeks)
-- Factor level monitoring
-- Clinical assessment
-- Good communication with treatment team
-
-Risk is still real but declining."""
-                
-                else:
-                    response += f"""{exposure} days is **ESTABLISHED PATIENT** status.
-
-With this much exposure history without inhibitor development, the risk drops substantially. But we still monitor because:
-- Chronic immune stimulation continues
-- Rare late inhibitor development possible
-- Some immune tolerance may develop favorably
-
-**Continue:**
-- Standard monitoring (quarterly inhibitor screens)
-- Regular hematology follow-up
-- Maintain prophylaxis adherence
-- Annual risk reassessment
-
-The good news: if no inhibitor by now, you're likely safe long-term."""
-                
-                response += f"""
-
-**Cumulative exposure impact:**
-At {exposure} days with {dose}-unit doses, this patient has received approximately {exposure * dose:,.0f} total factor units. This substantial cumulative exposure explains why monitoring remains important even at lower-risk stages."""
-            
-            elif detected_intent == "prevention":
-                response = f"""Great question - preventing inhibitor development is absolutely critical for this patient.
-
-**Prevention Strategy Overview:**
-
-**1. Primary Prevention (prevent inhibitor formation):**
-- **Product selection**: Some factors lower immunogenicity than others
-- **Optimal dosing**: Use lowest effective dose (minimizes immune triggers)
-- **Prophylaxis over on-demand**: Regular dosing is far better for immune tolerance
-- **Immune modulation**: Certain therapies support tolerance development
-
-**2. For this specific patient (Risk {risk:.1%}, {severity} {mutation}):**
-
-Given the {mutation} mutation and {severity} status, we recommend:
-- Prophylactic factor replacement (continuous, not on-demand)
-- Extended half-life factors to reduce infusion frequency
-- Possible immune-modulating adjuncts
-- Meticulous monitoring (the more data we have, the earlier we detect problems)
-
-**3. Lifestyle factors:**
-- Vaccinations kept current (strengthens immune system appropriately)
-- Avoid triggers of immune activation when possible
-- Good nutrition and exercise support immune tolerance
-- Stress reduction (psychological stress can trigger immune responses)
-
-**4. If inhibitor develops:**
-- NOT a failure - about 1 in 4 severe patients develop them
-- Immediate specialist referral
-- Switch to bypass agents (FEIBA or NovoSeven RT)
-- Start immune tolerance therapy (ITT) - success rates 50-70%
-- Close monitoring during ITT
-
-**Bottom line:**
-Prevention is better than treatment. For this patient, we're proactive: prophylactic therapy + intensive monitoring + specialist oversight. This approach gives us the best chance of normal factor response long-term."""
-            
-            elif detected_intent == "complication":
-                response = f"""Let me discuss the potential complications for this patient to help you understand what to watch for.
-
-**Most Important: Inhibitor Development**
-This is the "big one" for severe hemophilia. If immunity develops against factor replacement:
-- Factor infusions stop working effectively
-- Patient needs switch to expensive bypass medications (FEIBA, NovoSeven)
-- Untreated bleeds become more dangerous
-- BUT: Immune tolerance therapy (ITT) can re-establish tolerance in 50-70% of cases
-- Early detection is crucial
-
-**Joint Hemorrhages (Hemophilic Arthropathy)**
-Repeated joint bleeds cause permanent damage:
-- Usually knees, ankles, elbows affected
-- Progressive arthritis develops
-- Prevention >> treatment here
-- Prophylaxis significantly reduces this risk
-- PT/OT helps maintain function if damage occurs
-
-**Other Serious Complications:**
-- **Intracranial hemorrhage**: Rare but life-threatening; needs emergency factor + imaging
-- **Muscle hematomas**: Can compress nerves/vessels; requires adequate factor replacement
-- **Gastrointestinal bleeds**: Serious but manageable with prompt treatment
-
-**Modern Medicine Advantage:**
-- Virus screening reduces hepatitis/HIV risk (different era now)
-- New therapies like subcutaneous Emicizumab bypass many traditional risks
-- Home therapy training means faster treatment
-
-**What to monitor for:**
-- Unusual bleeding or oozing that won't stop
-- Sudden joint swelling (emergency factor needed)
-- Severe headache with factor infusion not helping (get imaging)
-- Muscle bruising or swelling
-- Fever with bleeding (potential infection)
-
-The good news: With modern prophylaxis and monitoring, avoiding most complications is very achievable."""
-            
-            else:  # General or unknown intent
-                # Calculate risk category
-                risk_categories = ["Very Low", "Low", "Moderate", "High", "Critical"]
-                risk_index = min(4, int(risk * 5))
-                risk_category = risk_categories[risk_index]
-                
-                response = f"""I'm here to help you understand this patient's hemophilia and inhibitor risk profile!
-
-**About this patient:**
-- **Risk Level**: {risk:.1%} ({risk_category})
-- **Hemophilia Type**: {severity}
-- **Genetic Mutation**: {mutation}
-- **Treatment Dose**: {dose} units
-- **Exposure Days**: {exposure}
-- **Main Risk Factor**: {main_factor}
-
-**I can help you with:**
-- Understanding their risk profile and what it means
-- Treatment options and protocols
-- Monitoring schedules and what tests they need
-- Genetic counseling and inheritance patterns
-- Prevention strategies for inhibitors
-- Potential complications and warning signs
-- Any specific clinical question about their care
-
-**Ask me anything like:**
-- "What's the prognosis?"
-- "How often should they be checked?"
-- "Will they develop an inhibitor?"
-- "What are the best treatment options?"
-- "What should their monitoring look like?"
-- "How does their mutation affect treatment?"
-
-Just ask naturally - I'll give you detailed, evidence-based clinical guidance!"""
-            
-            return response
+    if "data" not in st.session_state:
+        st.warning("⚠️ Run prediction first from Patient Form to access chatbot")
+    else:
+        d = st.session_state.data
         
-        # Display patient summary
-        risk_cat = "CRITICAL" if d["Risk"] > 0.8 else "HIGH" if d["Risk"] > 0.6 else "MODERATE" if d["Risk"] > 0.4 else "LOW"
-        emoji_map = {"CRITICAL": "🔴", "HIGH": "🟠", "MODERATE": "🟡", "LOW": "🟢"}
+        # Get or create patient ID
+        if "patient_id" not in st.session_state:
+            patient_data_dict = {
+                "Name": d.get("Name"),
+                "Age": d.get("Age"),
+                "Gender": d.get("Gender"),
+                "Ethnicity": d.get("Ethnicity"),
+                "Severity": d.get("Severity"),
+                "Mutation": d.get("Mutation"),
+                "Blood_Type": d.get("Blood Type"),
+                "HLA_Type": d.get("HLA Type"),
+                "Dose": d.get("Dose"),
+                "Exposure": d.get("Exposure"),
+                "Product_Type": d.get("Product"),
+                "Treatment_Adherence": d.get("Adherence"),
+                "Family_History": d.get("Family History"),
+                "Previous_Inhibitor": d.get("Previous Inhibitor"),
+                "Joint_Damage": d.get("Joint Damage"),
+                "Bleeding_Episodes": d.get("Bleeding Episodes"),
+                "Factor_Level": d.get("Factor Level"),
+                "Immunosuppression": d.get("Immunosuppression"),
+                "Active_Infection": d.get("Active Infection"),
+                "Vaccination_Status": d.get("Vaccination"),
+                "Physical_Activity": d.get("Activity Level"),
+                "Stress_Level": d.get("Stress Level"),
+                "Comorbidities": d.get("Comorbidities"),
+                "Risk_Score": d.get("Risk")
+            }
+            patient_id = add_patient(patient_data_dict)
+            st.session_state.patient_id = patient_id
+        else:
+            patient_id = st.session_state.patient_id
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Risk", f"{emoji_map[risk_cat]} {risk_cat}", f"{d['Risk']:.1%}")
-        with col2:
-            st.metric("Severity", d["Severity"])
-        with col3:
-            st.metric("Mutation", d["Mutation"])
-        with col4:
-            st.metric("Exposures", f"{d['Exposure']} days")
+        # Initialize conversation history
+        if "conversation_history" not in st.session_state:
+            st.session_state.conversation_history = []
         
-        st.divider()
+        # Display info about current patient
+        st.info(f"""
+        👤 **Patient:** {d['Name']} | 🔴 **Risk:** {d['Risk']:.1%} | 🧬 **Mutation:** {d['Mutation']} | ⚠️ **Severity:** {d['Severity']}
+        """)
+        
+        st.markdown("### 💬 AI Medical Conference")
+        st.markdown("*Real-time GPT-4 powered clinical decision support and medical consultation*")
         
         # Conversation display
         if st.session_state.conversation_history:
-            for msg in st.session_state.conversation_history[-10:]:  # Show last 10 messages
+            for msg in st.session_state.conversation_history:
                 if msg["role"] == "user":
-                    st.write(f"**You:** {msg['content']}")
+                    with st.chat_message("user", avatar="👨‍⚕️"):
+                        st.write(msg["content"])
                 else:
-                    st.write(f"\n**Assistant:** {msg['content']}\n")
-            st.divider()
+                    with st.chat_message("assistant", avatar="🤖"):
+                        st.write(msg["content"])
         
-        # Input
-        col1, col2 = st.columns([5, 1])
-        with col1:
-            question = st.text_input("💬 Ask anything about this patient...")
-        with col2:
-            if st.button("🗑️ Clear"):
+        # Chat input with columns for options
+        col_chat1, col_chat2, col_chat3 = st.columns([3, 0.7, 0.7])
+        
+        with col_chat1:
+            user_input = st.chat_input("Ask Dr. AI Medical Assistant anything about this patient's care...")
+        
+        with col_chat2:
+            if st.button("🧭 Clinical Recommendations"):
+                with st.spinner("🔄 Generating clinical recommendations..."):
+                    try:
+                        recommendations = get_clinical_recommendations(d)
+                        st.session_state.conversation_history.append({
+                            "role": "user",
+                            "content": "Generate comprehensive clinical recommendations"
+                        })
+                        st.session_state.conversation_history.append({
+                            "role": "assistant",
+                            "content": recommendations
+                        })
+                        add_conversation(patient_id, "Generate clinical recommendations", recommendations, "recommendations")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {str(e)[:100]}")
+        
+        with col_chat3:
+            if st.button("🧹 Clear Chat"):
                 st.session_state.conversation_history = []
                 st.rerun()
         
-        if question:
-            # Generate response
-            response = generate_response(question, d)
+        if user_input:
+            # Add user message
+            st.session_state.conversation_history.append({
+                "role": "user",
+                "content": user_input
+            })
             
-            # Display response
-            st.write(f"**Assistant:** {response}")
+            # Generate GPT response with patient context and history
+            with st.spinner("🤔 Dr. AI is thinking..."):
+                try:
+                    db_history = get_conversation_history(patient_id, limit=10)
+                    response = create_gpt_response(user_input, patient_context=d, conversation_history=db_history)
+                    
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    
+                    # Store in database
+                    add_conversation(patient_id, user_input, response, "general")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error generating response: {str(e)[:150]}")
+                    if "API" in str(e):
+                        st.warning("⚠️ Please ensure your OpenAI API key is set in the .env file")
+        
+        st.divider()
+        
+        # Additional options
+        col_opt1, col_opt2, col_opt3 = st.columns(3)
+        
+        with col_opt1:
+            if st.button("📋 Inhibitor Risk Analysis", use_container_width=True):
+                with st.spinner("Generating inhibitor risk analysis..."):
+                    try:
+                        risk_analysis = generate_inhibitor_risk_explanation(d, {
+                            "Mutation": d.get("Mutation"),
+                            "Severity": d.get("Severity"),
+                            "Exposure": d.get("Exposure"),
+                            "Family History": d.get("Family History")
+                        })
+                        st.markdown("### 🎯 Inhibitor Risk Analysis")
+                        st.write(risk_analysis)
+                        add_conversation(patient_id, "Inhibitor risk analysis requested", risk_analysis, "risk_analysis")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)[:100]}")
+        
+        with col_opt2:
+            if st.button("📊 Monitoring Data Analysis", use_container_width=True):
+                monitoring_records = get_monitoring_records(patient_id)
+                if monitoring_records:
+                    with st.spinner("Analyzing monitoring data..."):
+                        try:
+                            analysis = analyze_monitoring_data(d, monitoring_records)
+                            st.markdown("### 📊 Monitoring Analysis")
+                            st.write(analysis)
+                            add_conversation(patient_id, "Monitoring data analysis requested", analysis, "monitoring_analysis")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)[:100]}")
+                else:
+                    st.info("No monitoring records available yet")
+        
+        with col_opt3:
+            if st.button("💾 Save Doctor Note", use_container_width=True):
+                with st.expander("Add Doctor Note"):
+                    doctor_name = st.text_input("Doctor Name")
+                    note_content = st.text_area("Note Content")
+                    note_category = st.selectbox("Category", ["General", "Inhibitor", "Treatment", "Monitoring", "Follow-up"])
+                    severity = st.selectbox("Severity", ["Normal", "Important", "Urgent"])
+                    
+                    if st.button("Save Note"):
+                        if doctor_name and note_content:
+                            add_doctor_note(patient_id, doctor_name, note_content, note_category, severity)
+                            st.success("✅ Note saved!")
+                        else:
+                            st.warning("Please fill in all fields")
+
+# ============= END OF CHATBOT PAGE =============
+
+# ============= DOCTOR DASHBOARD ===============
+elif page == "Doctor Dashboard":
+    
+    st.title("🏥 Doctor Dashboard - Clinical Analytics & Management")
+    st.markdown("*Comprehensive patient management and clinical analytics portal*")
+    
+    # Get dashboard statistics
+    stats = get_dashboard_stats()
+    
+    # Display key metrics
+    st.markdown("### 📊 System Overview")
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+    
+    with metric_col1:
+        st.metric("Total Patients", stats["total_patients"], "Registered in system")
+    
+    with metric_col2:
+        high_risk_pct = f"{stats['high_risk_patients']/max(stats['total_patients'], 1)*100:.1f}%" if stats["total_patients"] > 0 else "0%"
+        st.metric("High Risk Patients", stats["high_risk_patients"], high_risk_pct)
+    
+    with metric_col3:
+        st.metric("Severe Cases", stats["severe_cases"], "Severe hemophilia")
+    
+    with metric_col4:
+        st.metric("Avg Risk Score", f"{stats['average_risk']:.1%}", "Population average")
+    
+    st.divider()
+    
+    # Navigation tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "👥 Patient Directory",
+        "📋 Clinical Notes",
+        "📊 Analytics & Trends",
+        "🔍 Search & Filter",
+        "⚙️ Utilities"
+    ])
+    
+    # ============= TAB 1: PATIENT DIRECTORY =============
+    with tab1:
+        st.markdown("### 👥 Registered Patients")
+        
+        patients = get_all_patients()
+        
+        if patients:
+            df_patients = pd.DataFrame(patients)
+            st.info(f"Total: {len(df_patients)} patients registered")
             
-            # Add to history
-            st.session_state.conversation_history.append({"role": "user", "content": question})
-            st.session_state.conversation_history.append({"role": "assistant", "content": response})
+            def get_risk_category(risk):
+                if risk > 0.8:
+                    return "🔴 CRITICAL"
+                elif risk > 0.6:
+                    return "🟠 HIGH"
+                elif risk > 0.4:
+                    return "🟡 MODERATE"
+                else:
+                    return "🟢 LOW"
+            
+            display_df = df_patients[['id', 'name', 'age', 'severity', 'mutation', 'dose', 'exposure', 'risk_score', 'treatment_adherence', 'created_at']].copy()
+            display_df['Risk Category'] = display_df['risk_score'].apply(get_risk_category)
+            display_df['Adherence'] = display_df['treatment_adherence'].astype(str) + "%"
+            
+            st.dataframe(display_df, use_container_width=True, height=400, hide_index=True)
+            
+            st.markdown("### 📋 Patient Details")
+            patient_id = st.selectbox("Select Patient to View Details", options=[p['id'] for p in patients], format_func=lambda x: next(p['name'] for p in patients if p['id'] == x))
+            
+            if patient_id:
+                patient = get_patient(patient_id)
+                col_detail1, col_detail2, col_detail3 = st.columns(3)
+                
+                with col_detail1:
+                    st.markdown("**Demographics**")
+                    st.write(f"Name: {patient.get('name')}")
+                    st.write(f"Age: {patient.get('age')}")
+                    st.write(f"Gender: {patient.get('gender')}")
+                
+                with col_detail2:
+                    st.markdown("**Clinical Profile**")
+                    st.write(f"Severity: {patient.get('severity')}")
+                    st.write(f"Mutation: {patient.get('mutation')}")
+                    st.write(f"Risk: {patient.get('risk_score'):.1%}")
+                
+                with col_detail3:
+                    st.markdown("**Treatment**")
+                    st.write(f"Dose: {patient.get('dose')} units")
+                    st.write(f"Exposure: {patient.get('exposure')} days")
+                    st.write(f"Adherence: {patient.get('treatment_adherence')}%")
+                
+                st.markdown("#### 📝 Doctor Notes")
+                doctor_notes = get_doctor_notes(patient_id)
+                
+                if doctor_notes:
+                    for note in doctor_notes:
+                        with st.expander(f"📌 {note['note_category']} - {note['created_at'][:10]}"):
+                            st.write(f"**Doctor:** {note['doctor_name']}")
+                            st.write(f"**Severity:** {note['severity']}")
+                            st.write(note['note_content'])
+                
+                with st.expander("➕ Add New Doctor Note"):
+                    new_doctor_name = st.text_input("Your Name", key="doctor_name_input")
+                    new_note_content = st.text_area("Note Content", key="note_content_input")
+                    new_note_category = st.selectbox("Category", ["General", "Inhibitor", "Treatment", "Monitoring", "Follow-up"], key="note_cat")
+                    new_note_severity = st.selectbox("Severity", ["Normal", "Important", "Urgent"], key="note_sev")
+                    
+                    if st.button("Save Doctor Note"):
+                        if new_doctor_name and new_note_content:
+                            add_doctor_note(patient_id, new_doctor_name, new_note_content, new_note_category, new_note_severity)
+                            st.success("✅ Note saved successfully!")
+                            st.rerun()
+                        else:
+                            st.warning("Please fill in all fields")
+        else:
+            st.info("No patients registered yet")
+    
+    # ============= TAB 2: CLINICAL NOTES =============
+    with tab2:
+        st.markdown("### 📋 Clinical Notes Management")
+        patients_list = get_all_patients()
+        if patients_list:
+            selected_patient = st.selectbox("Select Patient", options=[p['id'] for p in patients_list], format_func=lambda x: f"{[p['name'] for p in patients_list if p['id'] == x][0]} (Risk: {[p['risk_score'] for p in patients_list if p['id'] == x][0]:.1%})")
+            
+            if selected_patient:
+                patient_data = get_patient(selected_patient)
+                notes = get_doctor_notes(selected_patient)
+                st.markdown(f"**Patient:** {patient_data['name']} | **Risk:** {patient_data['risk_score']:.1%}")
+                
+                if notes:
+                    categories = set([n['note_category'] for n in notes])
+                    for cat in sorted(categories):
+                        cat_notes = [n for n in notes if n['note_category'] == cat]
+                        with st.expander(f"📌 {cat} ({len(cat_notes)} notes)"):
+                            for note in cat_notes:
+                                st.write(f"**{note['doctor_name']}** - {note['created_at'][:10]}")
+                                st.write(note['note_content'])
+                else:
+                    st.info("No clinical notes for this patient")
+        else:
+            st.info("No patients available")
+    
+    # ============= TAB 3: ANALYTICS =============
+    with tab3:
+        st.markdown("### 📊 Clinical Analytics & Trends")
+        patients_list = get_all_patients()
+        
+        if len(patients_list) > 0:
+            patients_df = pd.DataFrame(patients_list)
+            col_a1, col_a2 = st.columns(2)
+            
+            with col_a1:
+                st.markdown("**Risk Distribution**")
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.hist(patients_df['risk_score'], bins=10, color='skyblue', edgecolor='black')
+                ax.set_xlabel("Risk Score")
+                ax.set_ylabel("Number of Patients")
+                st.pyplot(fig)
+            
+            with col_a2:
+                st.markdown("**Severity Distribution**")
+                severity_counts = patients_df['severity'].value_counts()
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.pie(severity_counts.values, labels=severity_counts.index, autopct='%1.1f%%')
+                st.pyplot(fig)
+        else:
+            st.info("No data available")
+    
+    # ============= TAB 4: SEARCH & FILTER =============
+    with tab4:
+        st.markdown("### 🔍 Advanced Search & Filtering")
+        search_type = st.radio("Search By", ["Patient Name", "Risk Level", "Mutation Type", "Severity"])
+        
+        if search_type == "Patient Name":
+            search_term = st.text_input("Enter patient name")
+            if search_term:
+                results = search_patients(search_term)
+                if results:
+                    st.success(f"Found {len(results)} patient(s)")
+                    st.dataframe(pd.DataFrame(results)[['name', 'age', 'severity', 'mutation', 'risk_score']], use_container_width=True)
+                else:
+                    st.info("No patients found")
+    
+    # ============= TAB 5: UTILITIES =============
+    with tab5:
+        st.markdown("### ⚙️ System Utilities")
+        if st.button("📥 Export All Patients (CSV)", use_container_width=True):
+            patients_list = get_all_patients()
+            df_export = pd.DataFrame(patients_list)
+            csv = df_export.to_csv(index=False)
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv,
+                file_name=f"all_patients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+# ============= END OF DOCTOR DASHBOARD =============
+
+# ============= END OF ADVANCED CHATBOT =============
 
 # ---------------- FOOTER ----------------
 st.divider()
