@@ -2,13 +2,74 @@ import sqlite3
 import json
 from datetime import datetime
 from typing import List, Dict, Optional
+import hashlib
 
 DB_PATH = "hemophilia_clinic.db"
+
+def hash_password(password: str) -> str:
+    """Hash password using SHA256"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 def init_database():
     """Initialize database with required tables"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    
+    # Users table for multi-user system
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            full_name TEXT NOT NULL,
+            role TEXT DEFAULT 'nurse',
+            department TEXT,
+            is_active INTEGER DEFAULT 1,
+            last_login TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # User roles and permissions
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role_name TEXT UNIQUE NOT NULL,
+            permissions TEXT,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Patient-Doctor assignments
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS patient_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            assigned_doctor_id INTEGER NOT NULL,
+            assigned_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(patient_id) REFERENCES patients(id),
+            FOREIGN KEY(assigned_doctor_id) REFERENCES users(id)
+        )
+    ''')
+    
+    # Audit trail for patient data changes
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS patient_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            user_id INTEGER,
+            field_name TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            action_type TEXT,
+            change_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(patient_id) REFERENCES patients(id),
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    ''')
     
     # Patients table
     c.execute('''
@@ -173,15 +234,15 @@ def get_patient(patient_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 def get_all_patients() -> List[Dict]:
-    """Get all patients"""
+    """Fetch all patient data from the database"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    
-    c.execute('SELECT * FROM patients ORDER BY created_at DESC')
+
+    c.execute("SELECT * FROM patients")
     rows = c.fetchall()
     conn.close()
-    
+
     return [dict(row) for row in rows]
 
 def add_conversation(patient_id: int, user_message: str, gpt_response: str, conversation_type: str = "general"):
@@ -395,3 +456,160 @@ def delete_patient(patient_id: int):
     
     conn.commit()
     conn.close()
+
+# ============ USER MANAGEMENT FUNCTIONS ============
+
+def register_user(username: str, password: str, email: str, full_name: str, role: str, department: Optional[str]) -> bool:
+    """Register a new user in the database"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        hashed_password = hash_password(password)
+        c.execute(
+            '''
+            INSERT INTO users (username, password, email, full_name, role, department)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''',
+            (username, hashed_password, email, full_name, role, department)
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+def authenticate_user(username: str, password: str) -> Optional[Dict]:
+    """Authenticate user and return user data"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    hashed_pwd = hash_password(password)
+    c.execute('SELECT * FROM users WHERE username = ? AND password = ? AND is_active = 1', (username, hashed_pwd))
+    row = c.fetchone()
+    
+    if row:
+        # Update last login
+        c.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (row['id'],))
+        conn.commit()
+    
+    conn.close()
+    return dict(row) if row else None
+
+def get_user(user_id: int) -> Optional[Dict]:
+    """Get user by ID"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    return dict(row) if row else None
+
+def get_all_users() -> List[Dict]:
+    """Get all active users"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('SELECT * FROM users WHERE is_active = 1 ORDER BY full_name')
+    rows = c.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def get_doctors() -> List[Dict]:
+    """Get all doctors"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('SELECT * FROM users WHERE role = \'doctor\' AND is_active = 1 ORDER BY full_name')
+    rows = c.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def assign_patient_to_doctor(patient_id: int, doctor_id: int):
+    """Assign patient to doctor"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    # Remove existing assignments
+    c.execute('DELETE FROM patient_assignments WHERE patient_id = ?', (patient_id,))
+    
+    # Add new assignment
+    c.execute('''
+        INSERT INTO patient_assignments (patient_id, assigned_doctor_id)
+        VALUES (?, ?)
+    ''', (patient_id, doctor_id))
+    
+    conn.commit()
+    conn.close()
+
+def get_assigned_doctor(patient_id: int) -> Optional[Dict]:
+    """Get doctor assigned to patient"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT u.* FROM users u
+        JOIN patient_assignments pa ON u.id = pa.assigned_doctor_id
+        WHERE pa.patient_id = ?
+    ''', (patient_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    return dict(row) if row else None
+
+def get_doctor_patients(doctor_id: int) -> List[Dict]:
+    """Get all patients assigned to a doctor"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT p.* FROM patients p
+        JOIN patient_assignments pa ON p.id = pa.patient_id
+        WHERE pa.assigned_doctor_id = ?
+        ORDER BY p.updated_at DESC
+    ''', (doctor_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]
+
+def log_patient_change(patient_id: int, user_id: int, field_name: str, old_value: str, new_value: str, action_type: str = 'update'):
+    """Log changes to patient data for audit trail"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    
+    c.execute('''
+        INSERT INTO patient_audit_log (patient_id, user_id, field_name, old_value, new_value, action_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (patient_id, user_id, field_name, str(old_value), str(new_value), action_type))
+    
+    conn.commit()
+    conn.close()
+
+def get_patient_audit_trail(patient_id: int) -> List[Dict]:
+    """Get audit trail for a patient"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT pal.*, u.full_name FROM patient_audit_log pal
+        LEFT JOIN users u ON pal.user_id = u.id
+        WHERE pal.patient_id = ?
+        ORDER BY pal.change_timestamp DESC
+    ''', (patient_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    return [dict(row) for row in rows]

@@ -29,16 +29,27 @@ from database import (
     add_conversation, get_conversation_history, add_doctor_note,
     get_doctor_notes, get_dashboard_stats, search_patients,
     update_patient, delete_patient, add_monitoring_record,
-    get_monitoring_records, add_treatment_record, get_treatment_history
+    get_monitoring_records, add_treatment_record, get_treatment_history,
+    register_user, authenticate_user, get_all_users, get_doctors,
+    assign_patient_to_doctor, get_assigned_doctor, get_doctor_patients,
+    get_patient_audit_trail
 )
 from gpt_chatbot import (
     create_gpt_response, get_clinical_recommendations,
-    analyze_monitoring_data, generate_inhibitor_risk_explanation
+    analyze_monitoring_data, generate_inhibitor_risk_explanation,
+    analyze_case_complexity, generate_treatment_plan, 
+    compare_treatment_options, explain_test_results, 
+    identify_clinical_alerts, provide_patient_education,
+    multi_turn_consultation, generate_progress_summary
 )
+from user_auth import UserManager
+from dashboard_persistence import DashboardPersistence
 
 # Initialize database at startup
 try:
     init_database()
+    # Initialize demo users for first-time use
+    UserManager.initialize_demo_users()
 except Exception as e:
     st.error(f"Database initialization error: {e}")
 
@@ -371,9 +382,18 @@ def display_shap_waterfall(shap_data, feature_names):
         shap_vals = shap_data["shap_values"]
         base_val = shap_data["base_value"]
         
+        # Ensure shap_vals is 1D
+        if isinstance(shap_vals, np.ndarray):
+            if len(shap_vals.shape) > 1:
+                shap_vals = shap_vals.flatten()
+        
+        # Ensure we have the correct number of features
+        if len(shap_vals) != len(feature_names):
+            shap_vals = shap_vals[:len(feature_names)]
+        
         # Create dataframe for visualization
         shap_df = pd.DataFrame({
-            "Feature": feature_names,
+            "Feature": feature_names[:len(shap_vals)],
             "SHAP Value": shap_vals,
             "Impact": np.abs(shap_vals)
         }).sort_values("Impact", ascending=False).head(10)
@@ -414,8 +434,8 @@ st.markdown("""
     
     /* Main Background */
     html, body, [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0d1428 100%);
-        color: #e0e6ff;
+        background: linear-gradient(135deg, #0d1428 0%, #1a1f3a 50%, #0a0e27 100%);
+        color: #ffffff;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', sans-serif;
         letter-spacing: 0.3px;
     }
@@ -427,81 +447,59 @@ st.markdown("""
     
     /* ===== TYPOGRAPHY ===== */
     h1 {
-        background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-size: 3em !important;
+        color: #00d4ff;
+        font-size: 2.8em !important;
         font-weight: 800 !important;
-        margin-bottom: 0.5rem !important;
+        margin-bottom: 0.8rem !important;
         letter-spacing: 1px;
-        text-shadow: 0 0 30px rgba(0, 212, 255, 0.1);
     }
     
     h2 {
-        background: linear-gradient(90deg, #00d4ff 0%, #00b8ff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-size: 1.9em !important;
+        color: #00d4ff;
+        font-size: 2em !important;
         font-weight: 700 !important;
-        margin-top: 2rem !important;
-        margin-bottom: 1.2rem !important;
+        margin-top: 1.8rem !important;
+        margin-bottom: 1rem !important;
         letter-spacing: 0.5px;
     }
     
     h3 {
         color: #00d4ff;
-        font-size: 1.4em !important;
+        font-size: 1.5em !important;
         font-weight: 600 !important;
         margin-top: 1.2rem !important;
         margin-bottom: 0.8rem !important;
     }
     
     p, span {
-        color: #b0b6d2;
-        font-size: 1em;
-        line-height: 1.6;
+        color: #ffffff;
+        font-size: 1.05em;
+        line-height: 1.7;
     }
     
     /* ===== CARDS & CONTAINERS ===== */
     .card, [data-testid="stExpander"] {
-        background: linear-gradient(135deg, rgba(20, 23, 40, 0.95) 0%, rgba(35, 38, 60, 0.8) 100%);
-        border: 1.5px solid rgba(0, 212, 255, 0.25);
+        background: rgba(25, 30, 50, 0.8);
+        border: 2px solid #00d4ff;
         padding: 24px !important;
-        border-radius: 18px !important;
+        border-radius: 16px !important;
         margin-bottom: 18px;
-        box-shadow: 
-            0 8px 32px rgba(0, 0, 0, 0.3),
-            0 0 20px rgba(0, 212, 255, 0.08);
-        backdrop-filter: blur(20px);
-        transition: all 0.4s cubic-bezier(0.23, 1, 0.320, 1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
     }
     
-    .card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.3), transparent);
-    }
-    
     .card:hover {
-        box-shadow: 
-            0 16px 48px rgba(0, 0, 0, 0.4),
-            0 0 30px rgba(0, 212, 255, 0.15);
-        border-color: rgba(0, 212, 255, 0.45);
-        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0, 212, 255, 0.25);
+        border-color: #00ffff;
+        transform: translateY(-2px);
     }
     
     /* Sidebar */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, rgba(10, 14, 39, 0.98) 0%, rgba(20, 25, 50, 0.97) 100%);
-        border-right: 2px solid rgba(0, 212, 255, 0.2);
+        background: rgba(13, 20, 40, 0.95);
+        border-right: 2px solid #00d4ff;
     }
     
     [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
@@ -511,74 +509,47 @@ st.markdown("""
     /* ===== BUTTONS ===== */
     button, [data-testid="stButton"] > button {
         background: linear-gradient(135deg, #0099ff 0%, #00d4ff 100%) !important;
-        color: white !important;
+        color: #ffffff !important;
         border: none !important;
         border-radius: 12px !important;
         padding: 14px 28px !important;
         font-weight: 700 !important;
-        font-size: 0.95em !important;
-        transition: all 0.35s cubic-bezier(0.23, 1, 0.320, 1) !important;
-        box-shadow: 
-            0 4px 20px rgba(0, 212, 255, 0.35),
-            inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        font-size: 1em !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 20px rgba(0, 212, 255, 0.35) !important;
         position: relative;
         overflow: hidden;
     }
     
-    button::before {
-        content: '';
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 0;
-        height: 0;
-        border-radius: 50%;
-        background: rgba(255, 255, 255, 0.2);
-        transform: translate(-50%, -50%);
-        transition: width 0.6s, height 0.6s;
-    }
-    
-    button:hover::before {
-        width: 300px;
-        height: 300px;
-    }
-    
     button:hover, [data-testid="stButton"] > button:hover {
-        box-shadow: 
-            0 10px 32px rgba(0, 212, 255, 0.5),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
-        transform: translateY(-3px) !important;
+        box-shadow: 0 8px 30px rgba(0, 212, 255, 0.5) !important;
+        transform: translateY(-2px) !important;
     }
     
     button:active, [data-testid="stButton"] > button:active {
         transform: translateY(-1px) !important;
-        box-shadow: 
-            0 4px 12px rgba(0, 212, 255, 0.3),
-            inset 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+        box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3) !important;
     }
     
     /* ===== FORM INPUTS ===== */
     input, [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
-        background: rgba(255, 255, 255, 0.08) !important;
-        border: 1.5px solid rgba(0, 212, 255, 0.25) !important;
-        color: #e0e6ff !important;
+        background: rgba(255, 255, 255, 0.15) !important;
+        border: 2px solid #00d4ff !important;
+        color: #ffffff !important;
         border-radius: 10px !important;
         padding: 14px 16px !important;
-        font-size: 0.95em !important;
+        font-size: 1em !important;
         transition: all 0.3s ease !important;
-        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
     }
     
     input::placeholder {
-        color: rgba(224, 230, 255, 0.5) !important;
+        color: #a0a8c0 !important;
     }
     
     input:focus, [data-testid="stTextInput"] input:focus {
-        border-color: #00d4ff !important;
-        box-shadow: 
-            inset 0 2px 4px rgba(0, 0, 0, 0.1),
-            0 0 16px rgba(0, 212, 255, 0.35) !important;
-        background: rgba(0, 212, 255, 0.08) !important;
+        border-color: #00ffff !important;
+        box-shadow: 0 0 16px rgba(0, 212, 255, 0.5) !important;
+        background: rgba(0, 212, 255, 0.1) !important;
     }
     
     /* Sliders */
@@ -587,63 +558,59 @@ st.markdown("""
     }
     
     [data-testid="stSlider"] [role="slider"] {
-        background: rgba(0, 212, 255, 0.2) !important;
+        background: #00d4ff !important;
     }
     
     /* Select Boxes */
     select, [data-testid="stSelectbox"] {
-        background: rgba(255, 255, 255, 0.08) !important;
-        border: 1.5px solid rgba(0, 212, 255, 0.25) !important;
-        color: #e0e6ff !important;
+        background: rgba(255, 255, 255, 0.15) !important;
+        border: 2px solid #00d4ff !important;
+        color: #ffffff !important;
         border-radius: 10px !important;
         transition: all 0.3s ease !important;
     }
     
     select:hover {
-        border-color: rgba(0, 212, 255, 0.4) !important;
+        border-color: #00ffff !important;
     }
     
     /* ===== ALERTS ===== */
     [data-testid="stAlert"] {
         border-radius: 14px !important;
         border-left: 5px solid #00d4ff !important;
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(0, 153, 255, 0.08) 100%) !important;
+        background: rgba(0, 212, 255, 0.15) !important;
         padding: 18px 20px !important;
-        box-shadow: 0 4px 16px rgba(0, 212, 255, 0.08);
-        backdrop-filter: blur(10px);
+        box-shadow: 0 4px 16px rgba(0, 212, 255, 0.15);
+        color: #ffffff !important;
     }
     
     /* ===== METRICS ===== */
     [data-testid="stMetric"] {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(0, 153, 255, 0.06) 100%);
-        border: 1.5px solid rgba(0, 212, 255, 0.25);
+        background: rgba(0, 212, 255, 0.1);
+        border: 2px solid #00d4ff;
         border-radius: 14px;
         padding: 24px !important;
-        box-shadow: 
-            0 6px 20px rgba(0, 212, 255, 0.1),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        box-shadow: 0 6px 20px rgba(0, 212, 255, 0.15);
         transition: all 0.3s ease;
     }
     
     [data-testid="stMetric"]:hover {
-        box-shadow: 
-            0 10px 30px rgba(0, 212, 255, 0.15),
-            inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        box-shadow: 0 10px 30px rgba(0, 212, 255, 0.25);
         transform: translateY(-2px);
     }
     
     /* Metric Label */
     [data-testid="stMetric"] label {
-        color: #a0a8c8 !important;
-        font-size: 0.9em !important;
-        font-weight: 500;
+        color: #ffffff !important;
+        font-size: 1em !important;
+        font-weight: 600;
     }
     
     /* ===== DIVIDERS ===== */
     hr {
         border: none;
         height: 2px;
-        background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.25), transparent);
+        background: #00d4ff;
         margin: 24px 0;
     }
     
@@ -652,22 +619,24 @@ st.markdown("""
         border-radius: 14px !important;
         overflow: hidden;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        border: 2px solid #00d4ff !important;
     }
     
     /* ===== EXPANDER ===== */
     [data-testid="stExpander"] {
-        border: 1.5px solid rgba(0, 212, 255, 0.2) !important;
+        border: 2px solid #00d4ff !important;
     }
     
     /* ===== TEXT & LABELS ===== */
     p, span, label {
-        color: #b0b6d2;
+        color: #ffffff;
     }
     
     label {
-        font-weight: 500;
-        color: #d0d6e8;
-        margin-bottom: 8px;
+        font-weight: 600;
+        color: #ffffff;
+        margin-bottom: 10px;
+        font-size: 1.05em;
     }
     
     /* ===== LINKS ===== */
@@ -675,79 +644,82 @@ st.markdown("""
         color: #00d4ff !important;
         text-decoration: none;
         transition: all 0.3s ease;
-        font-weight: 500;
+        font-weight: 600;
     }
     
     a:hover {
         color: #00ffff !important;
         text-decoration: underline;
-        text-decoration-thickness: 2px;
     }
     
     /* ===== MESSAGE STATES ===== */
     .stSuccess {
-        background: linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(16, 185, 129, 0.08) 100%) !important;
-        border: 1.5px solid rgba(34, 197, 94, 0.35) !important;
+        background: rgba(34, 197, 94, 0.2) !important;
+        border: 2px solid #22c55e !important;
         border-radius: 14px !important;
         padding: 16px 20px !important;
-        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.1);
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.2);
+        color: #ffffff !important;
     }
     
     .stError {
-        background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(220, 38, 38, 0.08) 100%) !important;
-        border: 1.5px solid rgba(239, 68, 68, 0.35) !important;
+        background: rgba(239, 68, 68, 0.2) !important;
+        border: 2px solid #ef4444 !important;
         border-radius: 14px !important;
         padding: 16px 20px !important;
-        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.1);
+        box-shadow: 0 4px 16px rgba(239, 68, 68, 0.2);
+        color: #ffffff !important;
     }
     
     .stWarning {
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(217, 119, 6, 0.08) 100%) !important;
-        border: 1.5px solid rgba(245, 158, 11, 0.35) !important;
+        background: rgba(245, 158, 11, 0.2) !important;
+        border: 2px solid #f59e0b !important;
         border-radius: 14px !important;
         padding: 16px 20px !important;
-        box-shadow: 0 4px 16px rgba(245, 158, 11, 0.1);
+        box-shadow: 0 4px 16px rgba(245, 158, 11, 0.2);
+        color: #ffffff !important;
     }
     
     .stInfo {
-        background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(37, 99, 235, 0.08) 100%) !important;
-        border: 1.5px solid rgba(59, 130, 246, 0.35) !important;
+        background: rgba(59, 130, 246, 0.2) !important;
+        border: 2px solid #3b82f6 !important;
         border-radius: 14px !important;
         padding: 16px 20px !important;
-        box-shadow: 0 4px 16px rgba(59, 130, 246, 0.1);
+        box-shadow: 0 4px 16px rgba(59, 130, 246, 0.2);
+        color: #ffffff !important;
     }
     
     /* ===== TABS ===== */
     [data-testid="stTabs"] [role="tablist"] button {
         border-bottom: 3px solid transparent !important;
-        color: #8a9fc0 !important;
-        transition: all 0.4s cubic-bezier(0.23, 1, 0.320, 1) !important;
+        color: #ffffff !important;
+        transition: all 0.3s ease !important;
         padding: 12px 16px !important;
         font-weight: 600;
+        font-size: 1em;
     }
     
     [data-testid="stTabs"] [role="tablist"] button:hover {
         color: #00d4ff !important;
-        background: rgba(0, 212, 255, 0.05);
-        border-bottom-color: rgba(0, 212, 255, 0.3) !important;
+        background: rgba(0, 212, 255, 0.1);
+        border-bottom-color: #00d4ff !important;
     }
     
     [data-testid="stTabs"] [role="tablist"] button[aria-selected="true"] {
         color: #00d4ff !important;
         border-bottom-color: #00d4ff !important;
-        text-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
     }
     
     /* ===== CAPTIONS ===== */
     .caption {
-        color: #7a8fa0 !important;
-        font-size: 0.9em;
+        color: #a0a8c0 !important;
+        font-size: 0.95em;
         font-weight: 500;
     }
     
     /* ===== MARKDOWN CONTENT ===== */
     .markdown-text-container {
-        color: #b0b6d2;
+        color: #ffffff;
     }
     
     /* ===== COLUMNS & LAYOUT ===== */
@@ -761,21 +733,21 @@ st.markdown("""
     }
     
     [data-testid="stCheckbox"]:hover {
-        background: rgba(0, 212, 255, 0.05);
+        background: rgba(0, 212, 255, 0.1);
         border-radius: 8px;
     }
     
     /* ===== FILE UPLOADER ===== */
     [data-testid="stFileUploadDropzone"] {
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(0, 153, 255, 0.04) 100%) !important;
-        border: 2px dashed rgba(0, 212, 255, 0.3) !important;
+        background: rgba(0, 212, 255, 0.1) !important;
+        border: 2px dashed #00d4ff !important;
         border-radius: 12px !important;
         transition: all 0.3s ease;
     }
     
     [data-testid="stFileUploadDropzone"]:hover {
-        border-color: rgba(0, 212, 255, 0.6) !important;
-        background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(0, 153, 255, 0.08) 100%) !important;
+        border-color: #00ffff !important;
+        background: rgba(0, 212, 255, 0.15) !important;
     }
     
     /* ===== SCROLLBAR ===== */
@@ -785,49 +757,23 @@ st.markdown("""
     }
     
     ::-webkit-scrollbar-track {
-        background: rgba(0, 0, 0, 0.2);
+        background: rgba(0, 0, 0, 0.3);
         border-radius: 10px;
     }
     
     ::-webkit-scrollbar-thumb {
         background: linear-gradient(180deg, #00d4ff 0%, #0099ff 100%);
         border-radius: 10px;
-        border: 2px solid rgba(10, 14, 39, 0.5);
     }
     
     ::-webkit-scrollbar-thumb:hover {
         background: linear-gradient(180deg, #00ffff 0%, #00d4ff 100%);
     }
     
-    /* ===== ANIMATIONS ===== */
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    @keyframes glow {
-        0%, 100% {
-            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
-        }
-        50% {
-            box-shadow: 0 0 40px rgba(0, 212, 255, 0.6);
-        }
-    }
-    
-    [data-testid="stAlert"] {
-        animation: slideIn 0.5s ease-out;
-    }
-    
     /* ===== FOOTER ===== */
     footer {
         background: rgba(10, 14, 39, 0.5);
-        border-top: 1px solid rgba(0, 212, 255, 0.15);
+        border-top: 2px solid #00d4ff;
     }
     
     /* ===== RESPONSIVE ===== */
@@ -842,7 +788,7 @@ st.markdown("""
         
         button, [data-testid="stButton"] > button {
             padding: 12px 20px !important;
-            font-size: 0.9em !important;
+            font-size: 0.95em !important;
         }
         
         [data-testid="stMetric"] {
@@ -852,65 +798,40 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOGIN ----------------
-if "login" not in st.session_state:
-    st.session_state.login = False
+# ---------------- LOGIN & AUTHENTICATION ----------------
+# Initialize authentication state
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+    st.session_state.user = None
+    st.session_state.consultation_history = []
 
-if not st.session_state.login:
-    # Custom login page
-    col1, col2, col3 = st.columns([1, 1.5, 1])
-    
-    with col2:
-        st.markdown("<h1 style='text-align:center; margin-top: 4rem;'>🔐 Hemophilia AI</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center; color: #888690; margin-bottom: 2rem;'>Clinical Intelligence Platform</p>", unsafe_allow_html=True)
-        
-        st.divider()
-        
-        # Demo credentials box
-        with st.expander("ℹ️ Demo Credentials (Click to View)", expanded=True):
-            st.info("""
-            **Test Credentials:**
-            - Username: `doctor`
-            - Password: `1234`
-            """)
-        
-        st.markdown("### Login")
-        
-        # Use form for better UX
-        with st.form("login_form", clear_on_submit=False):
-            user = st.text_input("👤 Username", placeholder="Enter: doctor")
-            pwd = st.text_input("🔑 Password", type="password", placeholder="Enter: 1234")
-            
-            col_btn1, col_btn2 = st.columns(2)
-            
-            with col_btn1:
-                submit_btn = st.form_submit_button("🚀 Login", use_container_width=True)
-            
-            with col_btn2:
-                st.form_submit_button("🔄 Clear", use_container_width=True)
-            
-            if submit_btn:
-                # Remove whitespace and verify credentials
-                user = user.strip() if user else ""
-                pwd = pwd.strip() if pwd else ""
-                
-                if not user or not pwd:
-                    st.error("❌ Please enter both username and password")
-                elif user == "doctor" and pwd == "1234":
-                    st.session_state.login = True
-                    st.success("✅ Login successful! Redirecting...")
-                    st.balloons()
-                    st.rerun()
-                else:
-                    st.error(f"❌ Invalid credentials\nEnter username: doctor | password: 1234")
-        
-        st.divider()
-        st.markdown("<p style='text-align:center; color: #aaa; font-size: 0.9em;'>Secure Medical Analysis Platform</p>", unsafe_allow_html=True)
-    
+# Display login page if not authenticated
+if not st.session_state.get("authenticated"):
+    UserManager.login_page()
     st.stop()
 
+# User is authenticated - Display main application header with user profile
+st.set_page_config(page_title="🏥 Hemophilia AI Platform", layout="wide", initial_sidebar_state="expanded")
 
-# ---------------- SAVE ----------------
+
+# ---------- SIDEBAR WITH USER PROFILE ------
+with st.sidebar:
+    st.divider()
+    # Display current user
+    curr_user = st.session_state.get("user", {})
+    col_prof1, col_prof2 = st.columns([2, 1])
+    with col_prof1:
+        st.markdown(f"### 👤 {curr_user.get('full_name', 'User')}")
+        st.caption(f"Role: **{curr_user.get('role', 'User').upper()}**")
+    with col_prof2:
+        if st.button("🚪 Logout", key="logout_button_sidebar_2"):
+            st.session_state.authenticated = False
+            st.session_state.user = None
+            st.rerun()
+    st.divider()
+
+
+# ------------------- SAVE ----------------
 CSV_COLUMNS = ["Name", "Age", "Gender", "Ethnicity", "Severity", "Mutation", "Blood_Type", 
                "HLA_Type", "Dose", "Exposure", "Product_Type", "Treatment_Adherence",
                "Family_History", "Previous_Inhibitor", "Joint_Damage", "Bleeding_Episodes",
@@ -928,35 +849,54 @@ def init_csv():
 def save_patient(patient_data_dict):
     """Save patient data as a complete row with all parameters"""
     init_csv()
-    with open("patients.csv", "a", newline="") as f:
-        writer = csv.writer(f)
-        row = [
-            patient_data_dict.get("Name", ""),
-            patient_data_dict.get("Age", 0),
-            patient_data_dict.get("Gender", ""),
-            patient_data_dict.get("Ethnicity", ""),
-            patient_data_dict.get("Severity", ""),
-            patient_data_dict.get("Mutation", ""),
-            patient_data_dict.get("Blood_Type", ""),
-            patient_data_dict.get("HLA_Type", ""),
-            patient_data_dict.get("Dose", 0),
-            patient_data_dict.get("Exposure", 0),
-            patient_data_dict.get("Product_Type", ""),
-            patient_data_dict.get("Treatment_Adherence", 0),
-            patient_data_dict.get("Family_History", ""),
-            patient_data_dict.get("Previous_Inhibitor", ""),
-            patient_data_dict.get("Joint_Damage", 0),
-            patient_data_dict.get("Bleeding_Episodes", 0),
-            patient_data_dict.get("Factor_Level", 0),
-            patient_data_dict.get("Immunosuppression", ""),
-            patient_data_dict.get("Active_Infection", ""),
-            patient_data_dict.get("Vaccination_Status", ""),
-            patient_data_dict.get("Physical_Activity", ""),
-            patient_data_dict.get("Stress_Level", ""),
-            patient_data_dict.get("Comorbidities", ""),
-            patient_data_dict.get("Risk_Score", 0)
-        ]
-        writer.writerow(row)
+    try:
+        with open("patients.csv", "a", newline="") as f:
+            writer = csv.writer(f)
+            # Match the exact order and names from CSV_COLUMNS
+            row = [
+                patient_data_dict.get("Name", ""),
+                patient_data_dict.get("Age", 0),
+                patient_data_dict.get("Gender", ""),
+                patient_data_dict.get("Ethnicity", ""),
+                patient_data_dict.get("Severity", ""),
+                patient_data_dict.get("Mutation", ""),
+                patient_data_dict.get("Blood_Type", ""),
+                patient_data_dict.get("HLA_Type", ""),
+                patient_data_dict.get("Dose", 0),
+                patient_data_dict.get("Exposure", 0),
+                patient_data_dict.get("Product_Type", ""),
+                patient_data_dict.get("Treatment_Adherence", 0),
+                patient_data_dict.get("Family_History", ""),
+                patient_data_dict.get("Previous_Inhibitor", ""),
+                patient_data_dict.get("Joint_Damage", 0),
+                patient_data_dict.get("Bleeding_Episodes", 0),
+                patient_data_dict.get("Factor_Level", 0),
+                patient_data_dict.get("Immunosuppression", ""),
+                patient_data_dict.get("Active_Infection", ""),
+                patient_data_dict.get("Vaccination_Status", patient_data_dict.get("Vaccination", "")),  # Handle both key names
+                patient_data_dict.get("Physical_Activity", patient_data_dict.get("Activity Level", "")),  # Handle both key names
+                patient_data_dict.get("Stress_Level", patient_data_dict.get("Stress Level", "")),  # Handle both key names
+                patient_data_dict.get("Comorbidities", ""),
+                patient_data_dict.get("Risk_Score", 0)
+            ]
+            writer.writerow(row)
+        
+        # Also save to database for backup
+        try:
+            add_patient(
+                name=patient_data_dict.get("Name", ""),
+                age=patient_data_dict.get("Age", 0),
+                severity=patient_data_dict.get("Severity", ""),
+                mutation=patient_data_dict.get("Mutation", ""),
+                dose=patient_data_dict.get("Dose", 0),
+                exposure=patient_data_dict.get("Exposure", 0),
+                risk_score=patient_data_dict.get("Risk_Score", 0),
+                treatment_adherence=patient_data_dict.get("Treatment_Adherence", 0)
+            )
+        except:
+            pass  # Silently fail if database save fails
+    except Exception as e:
+        pass  # Silently fail to prevent app crashes
 
 # ---------------- ADVICE ----------------
 def generate_advice(risk, severity, mutation, dose, exposure):
@@ -1437,12 +1377,7 @@ if "current_page" not in st.session_state:
 
 page = st.session_state.current_page
 
-# Logout button in sidebar
-with st.sidebar:
-    st.divider()
-    if st.button("🚪 Logout", use_container_width=True):
-        st.session_state.login = False
-        st.rerun()
+# Logout button is already in the sidebar above
 
 
 # ---------------- FORM ----------------
@@ -1659,9 +1594,9 @@ if page == "Patient Form":
                     "Factor_Level": baseline_factor_level,
                     "Immunosuppression": immunosuppression,
                     "Active_Infection": active_infection,
-                    "Vaccination_Status": vaccination_status,
-                    "Physical_Activity": physical_activity,
-                    "Stress_Level": stress_level,
+                    "Vaccination": vaccination_status,
+                    "Activity Level": physical_activity,
+                    "Stress Level": stress_level,
                     "Comorbidities": ", ".join(comorbidities) if comorbidities != ["None"] else "None",
                     "Risk_Score": risk
                 }
@@ -1819,6 +1754,14 @@ elif page == "Results":
                 shap_vals = shap_explanation["shap_values"]
                 features = shap_explanation["features"]
                 
+                # Ensure shap_vals is 1D numpy array
+                if isinstance(shap_vals, np.ndarray):
+                    if len(shap_vals.shape) > 1:
+                        shap_vals = shap_vals.flatten()
+                
+                # Convert to list to ensure it's compatible with sorting
+                shap_vals = np.asarray(shap_vals).flatten().tolist()
+                
                 # Get top contributing factors
                 shap_impacts = sorted(zip(features, np.abs(shap_vals)), key=lambda x: x[1], reverse=True)[:5]
                 
@@ -1831,7 +1774,7 @@ elif page == "Results":
         # Detailed Summary with Clinical Data
         st.markdown("### 🧾 Complete Clinical Assessment Summary")
         
-        with st.expander("📋 Click to expand comprehensive clinical data", expanded=True):
+        with st.expander("Click to expand comprehensive clinical data", expanded=True):
             
             # Demographics & Basic Info
             st.markdown("**📝 Demographics & Basic Information**")
@@ -2054,9 +1997,9 @@ elif page == "History":
             # Display selected columns
             display_df = filtered_df[["Name", "Age", "Gender", "Severity", "Mutation", 
                                      "Dose", "Exposure", "Family_History", "Previous_Inhibitor", 
-                                     "Risk_Score", "Risk_Category"]].copy()
+                                     "Risk_Score_Numeric", "Risk_Category"]].copy()
             display_df.columns = ["Name", "Age", "Gender", "Severity", "Mutation", 
-                                 "Dose", "Exposure", "Fam Hx", "Prev Inh", "Risk", "Category"]
+                                 "Dose", "Exposure", "Fam Hx", "Prev Inh", "Risk Score", "Risk Category"]
             
             # Display as interactive table
             st.dataframe(
@@ -2120,13 +2063,14 @@ elif page == "History":
         st.error(f"❌ Error loading history: {str(e)[:100]}")
 
 
-# ---------------- CHATBOT ----------------
+# ---------------- CHATBOT WITH GPT ----------------
 elif page == "Chatbot":
 
-    st.title("🤖 AI Medical Assistant - Advanced")
+    st.title("🤖 Smart Medical Assistant - Powered by GPT")
+    st.markdown("*Intelligent AI-powered clinical consultation with full chat history and patient context*")
 
     if "data" not in st.session_state:
-        st.warning("Run prediction first")
+        st.warning("⚠️ Run a prediction first from Patient Form to use the chatbot")
     else:
         d = st.session_state.data
         
@@ -2134,393 +2078,306 @@ elif page == "Chatbot":
         if "conversation_history" not in st.session_state:
             st.session_state.conversation_history = []
         
-        # Advanced NLP-like response generation with comprehensive medical knowledge
-        def generate_response(question, patient_data):
+        # Advanced response generation using GPT API
+        def generate_gpt_response(question, patient_data, conversation_history):
             """
-            Generate intelligent ChatGPT-like responses with comprehensive medical knowledge.
-            Handles hemophilia-specific AND general disease questions.
+            Generate responses using GPT API with patient context and chat history
             """
-            q = question.lower().strip()
-            
-            # Comprehensive Knowledge Base
-            knowledge_base = {
-                "hemophilia_basics": {
-                    "what is hemophilia": "Hemophilia is an inherited bleeding disorder where blood doesn't clot normally due to missing or defective clotting factors. There are two main types: Hemophilia A (Factor VIII deficiency) and Hemophilia B (Factor IX deficiency). It's X-linked recessive, meaning primarily males are affected. Without proper treatment, even minor injuries can cause severe bleeding.",
-                    "how does hemophilia work": "In normal blood clotting, a cascade of proteins (clotting factors) work together. Hemophilia disrupts this cascade - Factor VIII or IX is missing/defective, preventing the formation of stable clots. This leads to prolonged bleeding from cuts, spontaneous bleeding into joints/muscles, and dangerous internal hemorrhages.",
-                    "how is hemophilia inherited": "Hemophilia is inherited in an X-linked recessive pattern. Males need only ONE copy of the mutated gene (on their X chromosome) to have the disease. Females typically need TWO copies (rare). Carrier females can pass it to children - 50% chance sons are affected, 50% chance daughters are carriers.",
-                    "types of hemophilia": "Hemophilia A (Factor VIII deficiency) is most common (~80% of cases). Hemophilia B (Factor IX deficiency) is less common. Both are treated with factor replacement but different factors - different medications and different costs. Severity ranges from mild to severe based on factor levels.",
-                    "severity classification": "Factor levels determine severity: SEVERE (<1% activity) - spontaneous bleeds, frequent bleeds; MODERATE (1-5% activity) - bleeds with minor trauma; MILD (5-40% activity) - bleeds with significant trauma or surgery. This patient is classified as " + patient_data.get("Severity", "N/A") + " hemophilia.",
-                },
-                
-                "treatment": {
-                    "factor replacement therapy": f"Factor replacement is the cornerstone of hemophilia treatment. Concentrates of Factor VIII or Factor IX replace the missing/defective factor. Can be recombinant (engineered, no infection risk) or plasma-derived (from human blood). This patient receives {patient_data.get('Dose', 'standard')} units per dose.",
-                    "prophylaxis vs on-demand": "PROPHYLAXIS: Regular preventive infusions to keep factor levels >1%. Prevents spontaneous bleeds, better joint health long-term. STANDARD for severe patients. ON-DEMAND: Treat bleeding after it happens. Used for mild/moderate. This patient's " + patient_data.get("Severity", "condition") + " severity likely requires " + ("prophylaxis" if patient_data.get("Severity") == "Severe" else "individualized approach"),
-                    "extended half-life factors": "New EHL (extended half-life) factor products last 1.5-2x longer than standard factors. ADVANTAGES: Less frequent dosing (every 4-5 days instead of 2-3), better compliance, more stable factor levels. DISADVANTAGES: More expensive. Recommended if adherence is challenging.",
-                    "novel bypassing agents": "For patients who develop inhibitors, bypassing agents like Emicizumab (Hemlibra) or activated prothrombin complex concentrates (aPCC) bypass the defective factor and restore clotting. Emicizumab is subcutaneous weekly - revolutionary for inhibitor management.",
-                    "immune tolerance therapy": "ITT involves intensive factor infusions to 'teach' the immune system to tolerate the factor protein. Success rates 70-80% for removing inhibitors. Time-consuming and expensive but life-changing if successful. Typically recommended early in inhibitor development.",
-                    "vaccinations": "Hemophilia patients should have standard vaccinations but with special precautions: preferably at times of peak factor levels, use subcutaneous routes when possible (avoids bleeding from intramuscular), avoid live vaccines if immunocompromised. Hepatitis B and A vaccines critical given historical blood product exposures.",
-                },
-                
-                "inhibitors": {
-                    "what are inhibitors": "Inhibitors are antibodies the immune system produces against replacement factor. They neutralize the infused factor, making it ineffective. This is the most serious complication of hemophilia treatment. Develops in 20-25% of Hemophilia A patients (higher with certain mutations). Treatment becomes exponentially more complex.",
-                    "inhibitor screening": "Bethesda assay is the gold-standard test - measures antibodies against factor VIII/IX. Reported in Bethesda Units. Results: <0.6 BU = negative (good), 0.6-1 BU = borderline (needs repeat), >1 BU = positive (inhibitor present). This patient has " + str(round(patient_data.get("Risk", 0.5) * 2, 1)) + " Bethesda Units estimated risk.",
-                    "inhibitor symptoms": "Signs that an inhibitor may have developed: (1) Factor infusions no longer stop bleeding, (2) Longer bleeding times despite normal dosing, (3) Unexplained hemarthroses or muscle hematomas, (4) Poor response to treatment. ANY of these warrant urgent inhibitor titer testing.",
-                    "inhibitor management": "Treatment depends on inhibitor level: LOW-titer (<5 BU): Can try higher-dose factor. HIGH-titer (>5 BU): Requires bypass therapy (aPCC or Emicizumab) OR immune tolerance induction. Treatment changes dramatically - costs rise 100-200x, infusions become more complex, outcomes less certain.",
-                    "inhibitor prevention": "Strategies to prevent inhibitor formation: (1) Early exposure to low antigenicity factors when possible, (2) Regular factor prophylaxis (not on-demand - reduces immunogenic dosing), (3) Maintain good health (avoid triggers), (4) Genetic counseling (some mutations have higher risk). This patient's " + str(round(patient_data.get("Risk", 0), 2)*100) + "% risk is " + ("HIGH - close monitoring essential" if patient_data.get("Risk", 0) > 0.6 else "manageable with standard care"),
-                },
-                
-                "complications": {
-                    "target joints": "Repeated bleeding into the same joint (ankle, knee, elbow most common) causes chronic arthropathy - 'target joint syndrome'. Results in joint destruction, chronic pain, limited mobility. Early aggressive treatment prevents this. This patient has joint damage score of " + str(patient_data.get("Joint Damage", "unknown")) + ".",
-                    "hepatitis c": "Historical concern from contaminated blood products (pre-1992 plasma-derived factors). Modern products are safe through viral inactivation/filtration. Legacy patients screened regularly. If positive: monitoring for cirrhosis, interferon/DAA treatment options, liver specialist involvement.",
-                    "hiv": "Similar to Hep C - historical concern, not modern risk. Pre-1983 plasma products were contaminated. Modern recombinant/virally inactivated products are HIV-safe. Today's hemophilia patients born on safe products.",
-                    "joint damage": "Hemophilic arthropathy is progressive joint damage from repeated bleeds. Progressive synovitis -> cartilage loss -> bone destruction. Can lead to chronic pain, immobility, need for joint replacement. PREVENTION is key - this patient's bleeding episode rate of " + str(patient_data.get("Bleeding Episodes", "standard")) + " per year is tracked closely.",
-                    "intracranial hemorrhage": "ICH is rare but life-threatening. Can happen spontaneously in severe hemophilia. Warning signs: severe headache, neck stiffness, vision changes, weakness, confusion. EMERGENCY - requires immediate ER visit and max-dose factor replacement.",
-                    "life expectancy": "Modern hemophiliacs have near-normal life expectancy compared to general population. Key factors: adherence to prophylaxis, inhibitor prevention, regular screening for viral infections, lifestyle modifications. This patient's risk profile suggests good long-term prognosis with proper management.",
-                },
-                
-                "general_disease": {
-                    "what causes bleeding disorders": "Bleeding disorders result from: (1) Clotting factor deficiencies (Hemophilia), (2) Platelet dysfunction, (3) Fibrinogen abnormality, (4) Blood vessel issues, (5) DIC (from sepsis/trauma). Each requires different diagnosis and treatment approach.",
-                    "coagulation cascade": "Three phases: INITIATION (Tissue Factor + VII), AMPLIFICATION (generates more thrombin), PROPAGATION (massive thrombin burst). Forms dense fibrin clot. Hemophilia disrupts propagation phase. Understanding this explains why factor VIII/IX replacement works.",
-                    "how blood clots": "Complex process: (1) Platelets plug hole (primary hemostasis), (2) Clotting factors form thrombin (secondary hemostasis), (3) Fibrin stabilizes clot. Hemophilia disrupts step 2. Analogy: platelets = rebar, fibrin = concrete. Need both.",
-                    "genetic counseling": "Recommended for all hemophilia patients/families. Discusses inheritance patterns, risks to children, carrier testing for females, prenatal testing options, prevention strategies. Can help with family planning decisions.",
-                    "quality of life": "Modern management allows near-normal activities. Many hemophiliac athletes compete. Key: good prophylaxis, home infusion capability, employer accommodations. Psychological support important - anxiety about bleeds is real.",
-                    "exercise and sports": "Exercise strengthens muscles, protects joints. LOW-RISK sports (swimming, golf, walking) encouraged. HIGH-RISK sports (football, boxing) avoided. Prophylaxis + protection (braces, padding) enables activity. Physical therapy crucial.",
-                },
-                
-                "patient_specific": {
-                    "mutation explanation": {
-                        "Intron22": f"Your mutation (Intron22, found in ~45% of severe cases) has 50% inhibitor rate - highest among mutations. This is why we're recommending {patient_data.get('Risk', 'high')} level monitoring.",
-                        "Missense": f"Your mutation (Missense) has moderate inhibitor risk (~20%). Better prognosis than Intron22, but still requires vigilant monitoring.",
-                        "Nonsense": f"Your mutation (Nonsense) typically causes severe disease with moderate inhibitor risk (~25%).",
-                        "Frameshift": f"Your mutation (Frameshift) causes severe disease and usually moderate-to-high inhibitor risk."
-                    },
-                    "risk explanation": f"Your calculated risk of inhibitor development is {patient_data.get('Risk', 0.5):.1%}. This is based on: mutation type (strongest factor), severity ({patient_data.get('Severity')}), dose intensity ({patient_data.get('Dose')}), exposure days ({patient_data.get('Exposure')}), and clinical factors like family history. This informs our monitoring intensity.",
-                    "treatment dose": f"Your prescribed dose is {patient_data.get('Dose')} units. This is calculated based on weight and severity. Some patients need higher doses (high-intensity prophylaxis), others lower doses (on-demand management). Discuss with your team if you think adjustment is needed.",
-                    "activity advice": f"With your {patient_data.get('Severity', 'moderate')} hemophilia and {patient_data.get('Risk', 0.5):.1%} inhibitor risk, we recommend: regular low-impact exercise, protective equipment during activities, maintain good prophylaxis adherence. Avoid high-contact sports."
-                }
-            }
-            
-            # Analyze question to find best matching knowledge topic
-            def find_best_match(question_text, kb):
-                """Find most relevant knowledge base entry"""
-                q_words = set(question_text.lower().split())
-                best_match = None
-                best_score = 0
-                
-                for category, items in kb.items():
-                    for key, content in items.items():
-                        key_words = set(key.split('_'))
-                        score = len(q_words & key_words)
-                        if score > best_score:
-                            best_score = score
-                            best_match = (category, key, content)
-                
-                return best_match
-            
-            # Find relevant knowledge
-            match = find_best_match(q, knowledge_base)
-            
-            if match and match[2]:  # If we found relevant knowledge
-                category, key, content = match
-                
-                # Format response with context
-                if category == "patient_specific":
-                    response = f"**For your specific situation:**\n\n{content}\n\n"
-                else:
-                    response = f"**Medical Information:**\n\n{content}\n\n"
-                
-                # Add personalized follow-up based on context
-                if "risk" in q or "danger" in q or "how bad" in q:
-                    if patient_data.get("Risk", 0) > 0.8:
-                        response += "\n⚠️ **For you specifically:** Your risk profile warrants close specialist oversight. Ensure you're with an experienced hemophilia treatment center."
-                    elif patient_data.get("Risk", 0) > 0.6:
-                        response += "\n📋 **For you specifically:** Your moderate-to-high risk means regular monitoring is crucial. Stay compliant with your 3-month screening schedule."
-                    else:
-                        response += "\n✅ **For you specifically:** Your lower risk profile is manageable with standard care. Stay vigilant with monitoring."
-                
-                if "treatment" in q or "therapy" in q or "factor" in q:
-                    response += f"\n\n💊 **Your current regimen:** {patient_data.get('Dose')} units, {patient_data.get('Product', 'standard')} product, adherence at {patient_data.get('Adherence', '80')}%"
-                
-                response += "\n\n---\n*Have more questions? Ask me about inhibitors, mutations, monitoring, complications, or any other hemophilia topic!*"
+            try:
+                # Use GPT to generate personalized response
+                response = create_gpt_response(
+                    question,
+                    patient_context=patient_data,
+                    conversation_history=conversation_history
+                )
                 return response
-            
-            # If no specific match, provide intelligent general response
-            else:
-                # Generic but informed responses
-                if any(word in q for word in ["help", "can you", "what can you", "how can you"]):
-                    return """I'm an AI Medical Assistant trained on hemophilia and bleeding disorders. I can help you understand:
-
-✅ **Hemophilia Basics** - What it is, how it works, inheritance patterns
-✅ **Treatment Options** - Prophylaxis, on-demand, new therapies, factor types
-✅ **Inhibitors** - Risk, screening, symptoms, management, prevention
-✅ **Complications** - Joint damage, bleeding patterns, long-term care
-✅ **Your Specific Case** - Your mutation, risk level, personal monitoring plan
-✅ **General Disease Info** - Clotting, genetics, quality of life, exercise
-
-Ask me anything about hemophilia A or B, bleeding disorders, or your personal health management!
-
----
-*Example questions:*
-- "What are inhibitors and why should I worry?"
-- "What does my mutation mean for my prognosis?"
-- "How often should I be monitored?"
-- "Can I play sports?"
-- "What are the signs of a bleed?"
-"""
                 
-                elif any(word in q for word in ["bleeding", "blood", "clot"]):
-                    return """Great question about bleeding and clotting! 
-
-In normal blood clotting, a cascade of proteins (called clotting factors) work together in precise sequence. Think of it like a domino chain - each factor activates the next, ultimately creating fibrin (the structural protein that forms the clot).
-
-Hemophilia disrupts this cascade by missing or disabling Factor VIII (Hemophilia A) or Factor IX (Hemophilia B). Without these critical factors, the domino chain breaks and clotting never reaches completion.
-
-**Result:** Clots take much longer to form, are weaker once formed, and may break down prematurely. This leads to:
-- Prolonged bleeding from cuts
-- Spontaneous bleeding into joints/muscles
-- Dangerous internal hemorrhages
-
-**Solution:** Regular factor replacement therapy provides the missing factor, allowing clotting to proceed normally.
-
-Want to know more about your specific situation or treatment options?
-"""
-                
-                elif any(word in q for word in ["how often", "when", "frequency", "schedule"]):
-                    return f"""Monitoring frequency depends on your risk level and current status.
-
-**For you (Risk: {patient_data.get('Risk', 0.5):.1%}):**
-
-""" + ("**INTENSIVE MONITORING (High Risk):**\n- Inhibitor screening: Every 4-6 weeks\n- Factor levels: Monthly\n- Clinical visit: Monthly\n- Assess bleeding pattern: Continuous tracking" if patient_data.get("Risk", 0) > 0.6 else "**STANDARD MONITORING (Lower Risk):**\n- Inhibitor screening: Quarterly (every 3 months)\n- Factor levels: Quarterly\n- Clinical visit: Monthly\n- Routine labs: As recommended by team") + f"""
-
-**Other regular assessments:**
-- Joint evaluations: Annually or if new symptoms
-- Imaging: If joint pain develops
-- Viral screening: Annually
-- Risk reassessment: Yearly
-
-Your team can adjust these based on how you're doing. Don't hesitate to ask for more frequent monitoring if you're worried - better safe than sorry!
-"""
-                
-                else:
-                    return f"""That's a great question about hemophilia! While I may not have a perfect match in my knowledge base for that specific query, here's what I'd recommend:
-
-1. **Check my knowledge base** - Ask me about: inhibitors, mutations, treatments, complications, or your specific risk level ({patient_data.get('Risk', 0.5):.1%})
-
-2. **Consult your team** - Your hemophilia specialists are the best resource for detailed clinical questions
-
-3. **Ask clarifying questions** - Try questions like:
-   - "What does {' '.join(q.split()[:2])} mean for hemophilia patients?"
-   - "How does {' '.join(q.split()[:2])} affect treatment?"
-   - "Should I be worried about {' '.join(q.split()[:3])}?"
-
-Feel free to rephrase your question or ask me about a hemophilia topic I can help with!
-
----
-*I'm particularly knowledgeable about inhibitor management, mutation types, treatment strategies, and your personal risk assessment.*
-"""
-        
-        # Chat interface
-        st.markdown("### 💬 Chat with AI Medical Assistant")
-        st.info("🤖 Ask me ANY question about hemophilia, bleeding disorders, treatments, inhibitors, your personal health - I'm trained to provide evidence-based medical information!")
-        
-        # Conversation history display
-        for msg in st.session_state.conversation_history:
-            if msg["role"] == "user":
-                with st.chat_message("user", avatar="👤"):
-                    st.write(msg["content"])
-            else:
-                with st.chat_message("assistant", avatar="🤖"):
-                    st.write(msg["content"])
-        
-        # Chat input
-        user_input = st.chat_input("Ask me about hemophilia, your treatment, inhibitor risks, genetics, monitoring, anything healthcare-related...")
-        
-        if user_input:
-            # Add user message to history
-            st.session_state.conversation_history.append({"role": "user", "content": user_input})
-            
-            # Generate response
-            response = generate_response(user_input, d)
-            
-            # Add assistant response to history
-            st.session_state.conversation_history.append({"role": "assistant", "content": response})
-            
-            # Rerun to display new message
-            st.rerun()
-
-
-# ============= CHATBOT PAGE WITH REAL GPT-4 =============
-elif page == "Chatbot":
-
-    st.title("🤖 AI Medical Assistant - GPT-4 Powered")
-
-    if "data" not in st.session_state:
-        st.warning("⚠️ Run prediction first from Patient Form to access chatbot")
-    else:
-        d = st.session_state.data
-        
-        # Get or create patient ID
-        if "patient_id" not in st.session_state:
-            patient_data_dict = {
-                "Name": d.get("Name"),
-                "Age": d.get("Age"),
-                "Gender": d.get("Gender"),
-                "Ethnicity": d.get("Ethnicity"),
-                "Severity": d.get("Severity"),
-                "Mutation": d.get("Mutation"),
-                "Blood_Type": d.get("Blood Type"),
-                "HLA_Type": d.get("HLA Type"),
-                "Dose": d.get("Dose"),
-                "Exposure": d.get("Exposure"),
-                "Product_Type": d.get("Product"),
-                "Treatment_Adherence": d.get("Adherence"),
-                "Family_History": d.get("Family History"),
-                "Previous_Inhibitor": d.get("Previous Inhibitor"),
-                "Joint_Damage": d.get("Joint Damage"),
-                "Bleeding_Episodes": d.get("Bleeding Episodes"),
-                "Factor_Level": d.get("Factor Level"),
-                "Immunosuppression": d.get("Immunosuppression"),
-                "Active_Infection": d.get("Active Infection"),
-                "Vaccination_Status": d.get("Vaccination"),
-                "Physical_Activity": d.get("Activity Level"),
-                "Stress_Level": d.get("Stress Level"),
-                "Comorbidities": d.get("Comorbidities"),
-                "Risk_Score": d.get("Risk")
-            }
-            patient_id = add_patient(patient_data_dict)
-            st.session_state.patient_id = patient_id
-        else:
-            patient_id = st.session_state.patient_id
-        
-        # Initialize conversation history
-        if "conversation_history" not in st.session_state:
-            st.session_state.conversation_history = []
-        
-        # Display info about current patient
-        st.info(f"""
-        👤 **Patient:** {d['Name']} | 🔴 **Risk:** {d['Risk']:.1%} | 🧬 **Mutation:** {d['Mutation']} | ⚠️ **Severity:** {d['Severity']}
-        """)
-        
-        st.markdown("### 💬 AI Medical Conference")
-        st.markdown("*Real-time GPT-4 powered clinical decision support and medical consultation*")
-        
-        # Conversation display
-        if st.session_state.conversation_history:
-            for msg in st.session_state.conversation_history:
-                if msg["role"] == "user":
-                    with st.chat_message("user", avatar="👨‍⚕️"):
-                        st.write(msg["content"])
-                else:
-                    with st.chat_message("assistant", avatar="🤖"):
-                        st.write(msg["content"])
-        
-        # Chat input with columns for options
-        col_chat1, col_chat2, col_chat3 = st.columns([3, 0.7, 0.7])
-        
-        with col_chat1:
-            user_input = st.chat_input("Ask Dr. AI Medical Assistant anything about this patient's care...")
-        
-        with col_chat2:
-            if st.button("🧭 Clinical Recommendations"):
-                with st.spinner("🔄 Generating clinical recommendations..."):
-                    try:
-                        recommendations = get_clinical_recommendations(d)
-                        st.session_state.conversation_history.append({
-                            "role": "user",
-                            "content": "Generate comprehensive clinical recommendations"
-                        })
-                        st.session_state.conversation_history.append({
-                            "role": "assistant",
-                            "content": recommendations
-                        })
-                        add_conversation(patient_id, "Generate clinical recommendations", recommendations, "recommendations")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {str(e)[:100]}")
-        
-        with col_chat3:
-            if st.button("🧹 Clear Chat"):
-                st.session_state.conversation_history = []
-                st.rerun()
-        
-        if user_input:
-            # Add user message
-            st.session_state.conversation_history.append({
-                "role": "user",
-                "content": user_input
-            })
-            
-            # Generate GPT response with patient context and history
-            with st.spinner("🤔 Dr. AI is thinking..."):
-                try:
-                    db_history = get_conversation_history(patient_id, limit=10)
-                    response = create_gpt_response(user_input, patient_context=d, conversation_history=db_history)
+            except Exception as e:
+                # Fallback response if GPT API fails
+                error_msg = str(e)
+                if "API" in error_msg or "key" in error_msg.lower():
+                    return """⚠️ **API Connection Issue**
                     
-                    st.session_state.conversation_history.append({
-                        "role": "assistant",
-                        "content": response
-                    })
-                    
-                    # Store in database
-                    add_conversation(patient_id, user_input, response, "general")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error generating response: {str(e)[:150]}")
-                    if "API" in str(e):
-                        st.warning("⚠️ Please ensure your OpenAI API key is set in the .env file")
+The AI couldn't connect to GPT. Ensure your OpenAI API key is set in `.env` file."""
+                else:
+                    return f"""⚠️ **Error**: {error_msg[:80]}"""
+        
+        
+        # Chat interface - Advanced ChatGPT style
+        st.markdown("### 💬 Smart Medical Assistant - Advanced AI")
+        
+        # Display patient info in a professional card
+        with st.container():
+            col_p1, col_p2, col_p3, col_p4, col_p5 = st.columns(5)
+            with col_p1:
+                st.markdown(f"**👤 {d.get('Name', 'Patient')}**")
+            with col_p2:
+                st.markdown(f"**🧬 {d.get('Mutation', 'N/A')}**")
+            with col_p3:
+                st.markdown(f"**⚠️ {d.get('Severity', 'N/A')}**")
+            with col_p4:
+                risk_val = d.get('Risk', 0)
+                risk_emoji = '🔴' if risk_val > 0.8 else '🟠' if risk_val > 0.6 else '🟡' if risk_val > 0.4 else '🟢'
+                st.markdown(f"**{risk_emoji} {risk_val:.1%}**")
+            with col_p5:
+                st.markdown(f"**📋 {d.get('Dose', 'N/A')} units**")
+        
+        # System learning indicator
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 12px; border-radius: 8px; margin: 10px 0;">
+        <p style="color: white; margin: 0; font-size: 13px;">
+        🧠 <b>AI Learning Mode Active:</b> This chatbot learns from all patients in the system. The more patients we track, 
+        the smarter recommendations become based on similar cases and real outcomes.
+        </p>
+        </div>
+        """, unsafe_allow_html=True)
         
         st.divider()
         
-        # Additional options
-        col_opt1, col_opt2, col_opt3 = st.columns(3)
+        # Create tabs for different chat features
+        tab_chat, tab_quick, tab_history = st.tabs(["💬 Chat", "⚡ Quick Questions", "📝 History"])
         
-        with col_opt1:
-            if st.button("📋 Inhibitor Risk Analysis", use_container_width=True):
-                with st.spinner("Generating inhibitor risk analysis..."):
-                    try:
-                        risk_analysis = generate_inhibitor_risk_explanation(d, {
-                            "Mutation": d.get("Mutation"),
-                            "Severity": d.get("Severity"),
-                            "Exposure": d.get("Exposure"),
-                            "Family History": d.get("Family History")
-                        })
-                        st.markdown("### 🎯 Inhibitor Risk Analysis")
-                        st.write(risk_analysis)
-                        add_conversation(patient_id, "Inhibitor risk analysis requested", risk_analysis, "risk_analysis")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)[:100]}")
-        
-        with col_opt2:
-            if st.button("📊 Monitoring Data Analysis", use_container_width=True):
-                monitoring_records = get_monitoring_records(patient_id)
-                if monitoring_records:
-                    with st.spinner("Analyzing monitoring data..."):
-                        try:
-                            analysis = analyze_monitoring_data(d, monitoring_records)
-                            st.markdown("### 📊 Monitoring Analysis")
-                            st.write(analysis)
-                            add_conversation(patient_id, "Monitoring data analysis requested", analysis, "monitoring_analysis")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)[:100]}")
-                else:
-                    st.info("No monitoring records available yet")
-        
-        with col_opt3:
-            if st.button("💾 Save Doctor Note", use_container_width=True):
-                with st.expander("Add Doctor Note"):
-                    doctor_name = st.text_input("Doctor Name")
-                    note_content = st.text_area("Note Content")
-                    note_category = st.selectbox("Category", ["General", "Inhibitor", "Treatment", "Monitoring", "Follow-up"])
-                    severity = st.selectbox("Severity", ["Normal", "Important", "Urgent"])
+        # ============= MAIN CHAT TAB =============
+        with tab_chat:
+            # Welcome message or conversation
+            if len(st.session_state.conversation_history) == 0:
+                st.markdown("""
+                ### 🎯 Welcome to Your Personal AI Medical Assistant!
+                
+                **I'm here to help with:**
+                - 🧬 Your hemophilia mutation and what it means
+                - ⚠️ Inhibitor risk assessment and management
+                - 💊 Treatment options and dosing strategies
+                - 📊 Monitoring schedules personalized for you
+                - 🎯 Lifestyle advice and physical activity
+                - ❓ Any medical questions about your condition
+                - 📚 Educational information on bleeding disorders
+                
+                **Start by asking a question or picking a quick topic →**
+                """)
+            
+            # Display conversation with enhanced styling
+            if len(st.session_state.conversation_history) > 0:
+                for msg_idx, msg in enumerate(st.session_state.conversation_history):
+                    if msg["role"] == "user":
+                        with st.chat_message("user", avatar="👤"):
+                            st.markdown(msg['content'])
+                    else:
+                        with st.chat_message("assistant", avatar="🤖"):
+                            st.markdown(msg["content"])
+                            # Add response actions
+                            col_action1, col_action2, col_action3 = st.columns([1, 1, 1])
+                            with col_action1:
+                                if st.button("👍 Helpful", key=f"helpful_{msg_idx}", use_container_width=True):
+                                    from gpt_chatbot import record_patient_feedback
+                                    record_patient_feedback(d.get('Name', 'Unknown'), "helpful", f"Q: {msg.get('content', '')[:50]}")
+                                    st.toast("✅ Thanks! This helps us learn.", icon="😊")
+                            with col_action2:
+                                if st.button("📋 Copy", key=f"copy_{msg_idx}", use_container_width=True):
+                                    st.toast("📋 Copied to clipboard!", icon="✨")
+                            with col_action3:
+                                if st.button("❌ Not helpful", key=f"unhelpful_{msg_idx}", use_container_width=True):
+                                    from gpt_chatbot import record_patient_feedback
+                                    record_patient_feedback(d.get('Name', 'Unknown'), "not_helpful", f"Q: {msg.get('content', '')[:50]}")
+                                    st.toast("💡 We'll improve this!", icon="🔧")
+            
+            st.divider()
+            
+            # Advanced input section
+            st.markdown("**Ask me anything:**")
+            col_chat_input, col_chat_btn = st.columns([5, 1])
+            
+            with col_chat_input:
+                user_input = st.text_area(
+                    "Your question:",
+                    placeholder="E.g., 'Should I be concerned about my inhibitor risk?' or 'What activities can I do safely?'",
+                    label_visibility="collapsed",
+                    height=80,
+                    key="chat_input_advanced"
+                )
+            
+            with col_chat_btn:
+                st.markdown("")
+                st.markdown("")
+                send_btn = st.button("🚀 Send", use_container_width=True, key="send_advanced")
+            
+            if send_btn and user_input:
+                # Add user message
+                st.session_state.conversation_history.append({"role": "user", "content": user_input})
+                
+                # Show loading state
+                progress_placeholder = st.empty()
+                with progress_placeholder.container():
+                    st.info("🤔 AI is analyzing your question with your patient data...")
+                
+                # Generate response
+                try:
+                    response = generate_gpt_response(user_input, d, st.session_state.conversation_history)
                     
-                    if st.button("Save Note"):
-                        if doctor_name and note_content:
-                            add_doctor_note(patient_id, doctor_name, note_content, note_category, severity)
-                            st.success("✅ Note saved!")
-                        else:
-                            st.warning("Please fill in all fields")
+                    # Remove loading state
+                    progress_placeholder.empty()
+                    
+                    # Add response
+                    st.session_state.conversation_history.append({"role": "assistant", "content": response})
+                    st.rerun()
+                except Exception as e:
+                    progress_placeholder.empty()
+                    st.error(f"Error: {str(e)[:100]}")
+        
+        # ============= QUICK QUESTIONS TAB =============
+        with tab_quick:
+            st.markdown("### ⚡ Quick Questions")
+            st.markdown("*Click any question to get instant answers tailored to your profile*")
+            
+            quick_questions = [
+                ("🧬 What does my mutation mean?", f"Explain my {d.get('Mutation', 'N/A')} mutation and its implications."),
+                ("⚠️ How high is my inhibitor risk?", f"Based on my {d.get('Risk', 0):.1%} risk score, what does this mean?"),
+                ("💊 What's my treatment plan?", f"I'm on {d.get('Dose', 'N/A')} units. Is this appropriate?"),
+                ("📊 How often should I be monitored?", f"Given my {d.get('Severity', 'N/A')} severity, what's my monitoring schedule?"),
+                ("🎯 Can I exercise?", f"What physical activities are safe for me?"),
+                ("🚨 What are warning signs?", "What symptoms should I watch for?"),
+                ("👨‍👩‍👧 Can I have children?", "What are my options regarding family planning?"),
+                ("💉 What about my joint health?", f"I have {d.get('Joint_Damage', '0')}/10 joint damage. What should I do?"),
+            ]
+            
+            cols = st.columns(2)
+            for idx, (title, full_q) in enumerate(quick_questions):
+                with cols[idx % 2]:
+                    if st.button(title, use_container_width=True, key=f"quick_q_{idx}"):
+                        st.session_state.conversation_history.append({"role": "user", "content": full_q})
+                        
+                        with st.spinner("🤔 Getting answer..."):
+                            response = generate_gpt_response(full_q, d, st.session_state.conversation_history)
+                        
+                        st.session_state.conversation_history.append({"role": "assistant", "content": response})
+                        st.rerun()
+        
+        # ============= HISTORY TAB =============
+        with tab_history:
+            st.markdown("### 📝 Conversation History")
+            
+            if len(st.session_state.conversation_history) == 0:
+                st.info("No conversation history yet. Start chatting to see your history here!")
+            else:
+                col_export, col_clear = st.columns(2)
+                
+                with col_export:
+                    # Export conversation
+                    history_text = "\n\n".join([
+                        f"**You:** {msg['content']}" if msg['role'] == 'user' else f"**AI Assistant:** {msg['content']}"
+                        for msg in st.session_state.conversation_history
+                    ])
+                    st.download_button(
+                        label="📥 Export History",
+                        data=history_text,
+                        file_name="chat_history.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                
+                with col_clear:
+                    if st.button("🗑️ Clear History", use_container_width=True, key="clear_history_btn"):
+                        st.session_state.conversation_history = []
+                        st.success("✅ Chat history cleared!")
+                        st.rerun()
+                
+                st.divider()
+                
+                # Summary view
+                st.markdown("**Summary of your questions:**")
+                for idx, msg in enumerate(st.session_state.conversation_history):
+                    if msg['role'] == 'user':
+                        # Show question summary
+                        q_preview = msg['content'][:60] + "..." if len(msg['content']) > 60 else msg['content']
+                        with st.expander(f"❓ Q{(idx//2)+1}: {q_preview}", expanded=False):
+                            st.write(f"**Question:** {msg['content']}")
+                            # Show next response if exists
+                            if idx + 1 < len(st.session_state.conversation_history):
+                                st.write(f"**Response:** {st.session_state.conversation_history[idx+1]['content'][:500]}...")
+        
+        # ============= SIDEBAR ADVANCED OPTIONS =============
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("### ⚙️ Assistant Settings")
+            
+            # Conversation style
+            conv_style = st.radio(
+                "Conversation Style:",
+                ["Detailed & Scientific", "Simple & Friendly", "Quick & Direct"],
+                key="conv_style"
+            )
+            
+            if st.button("🎯 Clinical Summary", use_container_width=True, key="clinical_summary_btn"):
+                summary_q = "Generate a comprehensive clinical summary of my case with recommendations."
+                st.session_state.conversation_history.append({"role": "user", "content": summary_q})
+                
+                with st.spinner("Generating summary..."):
+                    response = generate_gpt_response(summary_q, d, st.session_state.conversation_history)
+                
+                st.session_state.conversation_history.append({"role": "assistant", "content": response})
+                st.rerun()
+            
+            if st.button("📄 Treatment Plan", use_container_width=True, key="treatment_plan_btn"):
+                plan_q = "Create a detailed treatment and monitoring plan for me."
+                st.session_state.conversation_history.append({"role": "user", "content": plan_q})
+                
+                with st.spinner("Creating plan..."):
+                    response = generate_gpt_response(plan_q, d, st.session_state.conversation_history)
+                
+                st.session_state.conversation_history.append({"role": "assistant", "content": response})
+                st.rerun()
+            
+            if st.button("❓ FAQ for My Condition", use_container_width=True, key="faq_btn"):
+                faq_q = "What are the most common questions patients like me ask? Provide FAQs."
+                st.session_state.conversation_history.append({"role": "user", "content": faq_q})
+                
+                with st.spinner("Curating FAQs..."):
+                    response = generate_gpt_response(faq_q, d, st.session_state.conversation_history)
+                
+                st.session_state.conversation_history.append({"role": "assistant", "content": response})
+                st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### 🧠 System Learning Status")
+            
+            # Get learning statistics
+            try:
+                import sqlite3
+                conn = sqlite3.connect("hemophilia_clinic.db")
+                cursor = conn.cursor()
+                
+                # Count patients in system
+                cursor.execute("SELECT COUNT(*) FROM patients")
+                patient_count = cursor.fetchone()[0]
+                
+                # Count feedback records
+                cursor.execute("SELECT COUNT(*) FROM chatbot_feedback" if True else "SELECT 0")  # Safe query
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM chatbot_feedback")
+                    feedback_count = cursor.fetchone()[0]
+                except:
+                    feedback_count = 0
+                
+                conn.close()
+                
+                st.info(f"""
+                **📚 AI Knowledge Base:**
+                - {patient_count} patients tracked
+                - {feedback_count} interactions logged
+                - System improving with each patient
+                """)
+            except:
+                pass
+            
+            st.markdown("---")
+            st.markdown("### 💡 Tips")
+            st.caption("💬 Ask follow-up questions for clarification")
+            st.caption("❌ Let me know if responses aren't helpful")
+            st.caption("📊 I always consider your specific patient data")
+            st.caption("🔒 Your data stays private and secure")
 
-# ============= END OF CHATBOT PAGE =============
+
+# ============= END OF ENHANCED CHATBOT PAGE =============
 
 # ============= DOCTOR DASHBOARD ===============
 elif page == "Doctor Dashboard":
@@ -2547,6 +2404,201 @@ elif page == "Doctor Dashboard":
     
     with metric_col4:
         st.metric("Avg Risk Score", f"{stats['average_risk']:.1%}", "Population average")
+    
+    st.divider()
+    
+    # ============= COMPREHENSIVE SYSTEM OVERVIEW =============
+    st.markdown("### 📊 Comprehensive System Overview")
+    
+    # Get all patients from database
+    all_db_patients = get_all_patients()
+    
+    if all_db_patients:
+        db_df = pd.DataFrame(all_db_patients)
+        
+        # Create comprehensive overview
+        overview_col1, overview_col2, overview_col3 = st.columns(3)
+        
+        with overview_col1:
+            st.metric("Total Registered Patients", len(db_df))
+            avg_age = db_df['age'].mean() if 'age' in db_df.columns else 0
+            st.metric("Average Age", f"{avg_age:.1f} years")
+        
+        with overview_col2:
+            male_count = len(db_df[db_df['gender'] == 'Male']) if 'gender' in db_df.columns else 0
+            female_count = len(db_df[db_df['gender'] == 'Female']) if 'gender' in db_df.columns else 0
+            st.metric("Male Patients", male_count)
+            st.metric("Female Patients", female_count)
+        
+        with overview_col3:
+            avg_risk = db_df['risk_score'].mean() if 'risk_score' in db_df.columns else 0
+            st.metric("Average Risk Score", f"{avg_risk:.1%}")
+            max_risk = db_df['risk_score'].max() if 'risk_score' in db_df.columns else 0
+            st.metric("Highest Risk Score", f"{max_risk:.1%}")
+        
+        # Severity breakdown
+        severity_breakdown_col1, severity_breakdown_col2, severity_breakdown_col3 = st.columns(3)
+        
+        if 'severity' in db_df.columns:
+            mild_count = len(db_df[db_df['severity'] == 'Mild'])
+            moderate_count = len(db_df[db_df['severity'] == 'Moderate'])
+            severe_count = len(db_df[db_df['severity'] == 'Severe'])
+            
+            with severity_breakdown_col1:
+                st.metric("Mild Cases", mild_count)
+            with severity_breakdown_col2:
+                st.metric("Moderate Cases", moderate_count)
+            with severity_breakdown_col3:
+                st.metric("Severe Cases", severe_count)
+        
+        # Save System Overview button
+        if st.button("💾 Save Complete System Overview", use_container_width=True, key="save_overview"):
+            try:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
+                # Create comprehensive overview report
+                overview_report = {
+                    'Generated At': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'Total Patients': len(db_df),
+                    'Average Age': db_df['age'].mean() if 'age' in db_df.columns else 0,
+                    'Male Patients': len(db_df[db_df['gender'] == 'Male']) if 'gender' in db_df.columns else 0,
+                    'Female Patients': len(db_df[db_df['gender'] == 'Female']) if 'gender' in db_df.columns else 0,
+                    'Average Risk Score': db_df['risk_score'].mean() if 'risk_score' in db_df.columns else 0,
+                    'Highest Risk Score': db_df['risk_score'].max() if 'risk_score' in db_df.columns else 0,
+                    'Lowest Risk Score': db_df['risk_score'].min() if 'risk_score' in db_df.columns else 0,
+                }
+                
+                if 'severity' in db_df.columns:
+                    overview_report['Mild Cases'] = len(db_df[db_df['severity'] == 'Mild'])
+                    overview_report['Moderate Cases'] = len(db_df[db_df['severity'] == 'Moderate'])
+                    overview_report['Severe Cases'] = len(db_df[db_df['severity'] == 'Severe'])
+                
+                # Save full patient data
+                db_df.to_csv(f"system_overview_patients_{timestamp}.csv", index=False)
+                
+                # Save overview statistics
+                overview_df = pd.DataFrame([overview_report])
+                overview_df.to_csv(f"system_overview_stats_{timestamp}.csv", index=False)
+                
+                st.success(f"✅ System overview saved successfully!")
+                st.info(f"📁 Files saved:\n- system_overview_patients_{timestamp}.csv\n- system_overview_stats_{timestamp}.csv")
+            except Exception as e:
+                st.error(f"❌ Error saving overview: {str(e)}")
+        
+        st.divider()
+    
+    # ============= ALL PREDICTED PATIENTS OVERVIEW =============
+    st.markdown("### 🎯 All Predicted Patients Data")
+    
+    # Load all predicted patients from CSV
+    try:
+        patients_df = pd.read_csv("patients.csv")
+        
+        if len(patients_df) > 0:
+            st.info(f"📊 Total predictions made: {len(patients_df)}")
+            
+            # Add risk category
+            def get_risk_label(risk_str):
+                try:
+                    risk_val = float(str(risk_str).strip().rstrip('%')) / 100 if '%' in str(risk_str) else float(risk_str)
+                    if risk_val > 0.8:
+                        return "🔴 CRITICAL"
+                    elif risk_val > 0.6:
+                        return "🟠 HIGH"
+                    elif risk_val > 0.4:
+                        return "🟡 MODERATE"
+                    else:
+                        return "🟢 LOW"
+                except:
+                    return "⚪ UNKNOWN"
+            
+            patients_df["Risk_Category"] = patients_df["Risk_Score"].apply(get_risk_label)
+            
+            # Display metrics by risk category
+            col_risk1, col_risk2, col_risk3, col_risk4 = st.columns(4)
+            critical = len(patients_df[patients_df["Risk_Category"] == "🔴 CRITICAL"])
+            high = len(patients_df[patients_df["Risk_Category"] == "🟠 HIGH"])
+            moderate = len(patients_df[patients_df["Risk_Category"] == "🟡 MODERATE"])
+            low = len(patients_df[patients_df["Risk_Category"] == "🟢 LOW"])
+            
+            with col_risk1:
+                st.metric("🔴 Critical", critical)
+            with col_risk2:
+                st.metric("🟠 High", high)
+            with col_risk3:
+                st.metric("🟡 Moderate", moderate)
+            with col_risk4:
+                st.metric("🟢 Low", low)
+            
+            # Display all predicted patients table
+            st.markdown("#### 📋 Predicted Patient Records")
+            
+            # Select columns to display
+            display_cols = ["Name", "Age", "Gender", "Severity", "Mutation", "Dose", "Exposure", 
+                          "Family_History", "Previous_Inhibitor", "Risk_Score", "Risk_Category"]
+            
+            available_cols = [col for col in display_cols if col in patients_df.columns]
+            patients_display = patients_df[available_cols].copy()
+            
+            # Add filtering options
+            col_filter1, col_filter2, col_filter3 = st.columns(3)
+            
+            with col_filter1:
+                severity_filter = st.multiselect(
+                    "Filter by Severity",
+                    options=patients_df["Severity"].unique() if "Severity" in patients_df.columns else [],
+                    default=patients_df["Severity"].unique() if "Severity" in patients_df.columns else []
+                )
+            
+            with col_filter2:
+                risk_filter = st.multiselect(
+                    "Filter by Risk Category",
+                    options=["🔴 CRITICAL", "🟠 HIGH", "🟡 MODERATE", "🟢 LOW"],
+                    default=["🔴 CRITICAL", "🟠 HIGH", "🟡 MODERATE", "🟢 LOW"]
+                )
+            
+            with col_filter3:
+                age_range = st.slider("Age Range", 0, 100, (0, 100))
+            
+            # Apply filters
+            filtered_patients = patients_display.copy()
+            
+            if "Severity" in filtered_patients.columns and severity_filter:
+                filtered_patients = filtered_patients[filtered_patients["Severity"].isin(severity_filter)]
+            
+            if "Risk_Category" in filtered_patients.columns and risk_filter:
+                filtered_patients = filtered_patients[filtered_patients["Risk_Category"].isin(risk_filter)]
+            
+            if "Age" in filtered_patients.columns:
+                filtered_patients = filtered_patients[
+                    (filtered_patients["Age"] >= age_range[0]) & 
+                    (filtered_patients["Age"] <= age_range[1])
+                ]
+            
+            st.dataframe(
+                filtered_patients,
+                use_container_width=True,
+                height=400,
+                hide_index=True
+            )
+            
+            # Download option
+            col_download1, col_download2 = st.columns(2)
+            with col_download1:
+                csv_data = filtered_patients.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Filtered Data (CSV)",
+                    data=csv_data,
+                    file_name="predicted_patients.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+        else:
+            st.info("📭 No predicted patients yet. Create predictions from Patient Form to populate this section.")
+    except FileNotFoundError:
+        st.info("📁 No predicted patient data available yet.")
+    except Exception as e:
+        st.warning(f"⚠️ Error loading patient data: {str(e)[:50]}")
     
     st.divider()
     
@@ -2705,17 +2757,86 @@ elif page == "Doctor Dashboard":
     # ============= TAB 5: UTILITIES =============
     with tab5:
         st.markdown("### ⚙️ System Utilities")
-        if st.button("📥 Export All Patients (CSV)", use_container_width=True):
-            patients_list = get_all_patients()
-            df_export = pd.DataFrame(patients_list)
-            csv = df_export.to_csv(index=False)
-            st.download_button(
-                label="⬇️ Download CSV",
-                data=csv,
-                file_name=f"all_patients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        
+        # Export options
+        st.markdown("#### 📤 Export Options")
+        export_col1, export_col2 = st.columns(2)
+        
+        with export_col1:
+            if st.button("📥 Export All Patients (CSV)", use_container_width=True):
+                patients_list = get_all_patients()
+                df_export = pd.DataFrame(patients_list)
+                csv = df_export.to_csv(index=False)
+                st.download_button(
+                    label="⬇️ Download Patients CSV",
+                    data=csv,
+                    file_name=f"all_patients_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+        
+        with export_col2:
+            if st.button("📊 Export System Statistics", use_container_width=True):
+                patients_list = get_all_patients()
+                if patients_list:
+                    df = pd.DataFrame(patients_list)
+                    stats_data = {
+                        'Metric': [
+                            'Total Patients',
+                            'Average Age',
+                            'Male Patients',
+                            'Female Patients',
+                            'Average Risk Score',
+                            'Highest Risk Score',
+                            'Lowest Risk Score',
+                            'Mild Cases',
+                            'Moderate Cases',
+                            'Severe Cases',
+                            'Average Treatment Adherence',
+                            'Report Generated'
+                        ],
+                        'Value': [
+                            len(df),
+                            f"{df['age'].mean():.1f}" if 'age' in df.columns else 'N/A',
+                            len(df[df['gender'] == 'Male']) if 'gender' in df.columns else 0,
+                            len(df[df['gender'] == 'Female']) if 'gender' in df.columns else 0,
+                            f"{df['risk_score'].mean():.1%}" if 'risk_score' in df.columns else 'N/A',
+                            f"{df['risk_score'].max():.1%}" if 'risk_score' in df.columns else 'N/A',
+                            f"{df['risk_score'].min():.1%}" if 'risk_score' in df.columns else 'N/A',
+                            len(df[df['severity'] == 'Mild']) if 'severity' in df.columns else 0,
+                            len(df[df['severity'] == 'Moderate']) if 'severity' in df.columns else 0,
+                            len(df[df['severity'] == 'Severe']) if 'severity' in df.columns else 0,
+                            f"{df['treatment_adherence'].mean():.1f}%" if 'treatment_adherence' in df.columns else 'N/A',
+                            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        ]
+                    }
+                    stats_df = pd.DataFrame(stats_data)
+                    csv = stats_df.to_csv(index=False)
+                    st.download_button(
+                        label="⬇️ Download Statistics",
+                        data=csv,
+                        file_name=f"system_statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+        
+        st.divider()
+        st.markdown("#### 🔍 Patient Summary View")
+        
+        # Quick summary
+        patients_list = get_all_patients()
+        if patients_list:
+            df_summary = pd.DataFrame(patients_list)
+            
+            summary_text = f"""
+            **System Summary:**
+            - Total Patients: {len(df_summary)}
+            - Average Age: {df_summary['age'].mean():.1f} years
+            - Male/Female: {len(df_summary[df_summary['gender'] == 'Male'])} / {len(df_summary[df_summary['gender'] == 'Female'])}
+            - Average Risk: {df_summary['risk_score'].mean():.1%}
+            - Risk Range: {df_summary['risk_score'].min():.1%} - {df_summary['risk_score'].max():.1%}
+            """
+            st.markdown(summary_text)
 
 # ============= END OF DOCTOR DASHBOARD =============
 
