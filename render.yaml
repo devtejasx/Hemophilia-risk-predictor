@@ -1,7 +1,7 @@
 services:
   - type: web
     name: hemophilia-clinician-ai
-    runtime: python312
+    runtime: python311
     buildCommand: "bash build.sh"
     startCommand: "streamlit run app.py --server.port=$PORT --server.headless=true --server.enableCORS=false"
     envVars:
