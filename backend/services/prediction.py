@@ -63,10 +63,24 @@ class PredictionService:
     
     def _load_model(self, model_path: str):
         """Load trained model from file."""
+        # Handle None or empty path
+        if not model_path:
+            logger.warning("No model path provided, returning None")
+            return None
+        
         try:
-            model = joblib.load(model_path)
+            # Validate path exists
+            path = Path(model_path)
+            if not path.exists():
+                logger.warning(f"Model file not found: {model_path}")
+                return None
+            
+            model = joblib.load(str(path))
             logger.info(f"Model loaded: {model_path}")
             return model
+        except TypeError as e:
+            logger.error(f"Invalid model path type: {str(e)}")
+            return None
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             return None
@@ -74,8 +88,20 @@ class PredictionService:
     def _initialize_explainability(self, background_data_path: Optional[str]) -> None:
         """Initialize SHAP explainer."""
         try:
+            # Skip if model failed to load
+            if self.model is None:
+                logger.warning("Cannot initialize explainability: model is None")
+                self.explainability_enabled = False
+                return
+            
             if background_data_path:
-                self.background_data = joblib.load(background_data_path)
+                try:
+                    path = Path(background_data_path)
+                    if path.exists():
+                        self.background_data = joblib.load(str(path))
+                except Exception as bg_error:
+                    logger.warning(f"Could not load background data: {bg_error}")
+                    self.background_data = None
             
             self.explainer = ExplainabilityService(
                 model=self.model,

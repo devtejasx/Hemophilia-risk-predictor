@@ -51,6 +51,10 @@ from clinical_assistant import (
     StructuredClinicalAssistant, ClinicalAssistantMode, 
     get_clinical_response, get_available_modes
 )
+from shap_explainability import (
+    SHAPExplainer, SHAPVisualizer, SHAPInterpreter,
+    display_shap_dashboard, display_feature_importance, explain_individual_prediction
+)
 
 # Initialize database at startup
 try:
@@ -1886,6 +1890,124 @@ elif page == "Results":
                 st.metric("RF Model", f"{rf_score:.1%}")
             with col_pred4:
                 st.metric("XGBoost", f"{xgb_score:.1%}")
+        
+        st.divider()
+        
+        # SHAP Explainability Analysis
+        st.markdown("### 🧠 SHAP Model Explainability Analysis")
+        st.markdown("*Understanding what features contribute most to this prediction*")
+        
+        try:
+            # Prepare data for SHAP explanation
+            rf_model, xgb_model, columns = load_models()
+            
+            if rf_model is not None and columns is not None:
+                # Create feature data matching training structure
+                feature_data = {
+                    "mutation_type": d.get("Mutation", "missense").lower(),
+                    "exon": {"intron22": 22, "missense": 5, "nonsense": 10}.get(d.get("Mutation", "missense").lower(), 22),
+                    "severity": d.get("Severity", "moderate").lower(),
+                    "age_first_treatment": float(d.get("Age", 0)),
+                    "dose_intensity": float(d.get("Dose", 0)),
+                    "exposure_days": float(d.get("Exposure", 0))
+                }
+                
+                df_features = pd.DataFrame([feature_data])
+                df_features = pd.get_dummies(df_features, columns=['mutation_type', 'severity'])
+                
+                # Ensure all columns exist
+                for col in columns:
+                    if col not in df_features:
+                        df_features[col] = 0
+                
+                df_features = df_features[columns]
+                
+                # Initialize SHAP explainer
+                explainer = SHAPExplainer(rf_model, columns, model_type="random_forest")
+                explanation = explainer.explain_prediction(df_features)
+                
+                if explanation is not None:
+                    # Create tabs for different visualizations
+                    tab_summary, tab_waterfall, tab_force, tab_importance, tab_interpretation = st.tabs(
+                        ["📊 Summary", "⛲ Waterfall", "⚡ Force", "📈 Importance", "📋 Interpretation"]
+                    )
+                    
+                    with tab_summary:
+                        st.markdown("**Feature Importance Summary**")
+                        summary_plot = SHAPVisualizer.plot_summary(explanation, top_features=10, plot_type="bar")
+                        if summary_plot:
+                            st.pyplot(summary_plot)
+                    
+                    with tab_waterfall:
+                        st.markdown("**Prediction Waterfall - How Each Feature Contributes**")
+                        waterfall_plot = SHAPVisualizer.plot_waterfall(explanation, instance_idx=0, top_features=10)
+                        if waterfall_plot:
+                            st.pyplot(waterfall_plot)
+                    
+                    with tab_force:
+                        st.markdown("**Force Plot - Risk Drivers vs Risk Reducers**")
+                        force_plot = SHAPVisualizer.plot_force(explanation, instance_idx=0)
+                        if force_plot:
+                            st.pyplot(force_plot)
+                    
+                    with tab_importance:
+                        st.markdown("**Global Feature Importance**")
+                        importance_df = explainer.get_feature_importance(df_features, top_n=10)
+                        if not importance_df.empty:
+                            col_chart, col_table = st.columns([2, 1])
+                            with col_chart:
+                                fig, ax = plt.subplots(figsize=(10, 6))
+                                colors = plt.cm.viridis(np.linspace(0.3, 0.9, len(importance_df)))
+                                ax.barh(importance_df["Feature"], importance_df["Importance"], color=colors, alpha=0.8, edgecolor='white', linewidth=1.5)
+                                ax.set_xlabel("Mean |SHAP Value|", fontweight='bold')
+                                ax.set_title("Global Feature Importance", fontweight='bold', fontsize=12)
+                                ax.set_facecolor('#0a0e27')
+                                fig.patch.set_facecolor('#0a0e27')
+                                ax.tick_params(colors='#e0e6ff')
+                                for spine in ax.spines.values():
+                                    spine.set_color('#e0e6ff')
+                                ax.spines['top'].set_visible(False)
+                                ax.spines['right'].set_visible(False)
+                                plt.tight_layout()
+                                st.pyplot(fig)
+                            
+                            with col_table:
+                                st.markdown("**Top Features**")
+                                for idx, row in importance_df.head(5).iterrows():
+                                    st.metric(row["Feature"], f"{row['Importance']:.4f}")
+                    
+                    with tab_interpretation:
+                        st.markdown("**Simple Language Interpretation**")
+                        interpreter = SHAPInterpreter()
+                        interpretation = interpreter.interpret_prediction(
+                            explanation, 
+                            instance_idx=0, 
+                            risk_threshold=0.5,
+                            context="clinical"
+                        )
+                        
+                        if "error" not in interpretation:
+                            col_int1, col_int2, col_int3 = st.columns(3)
+                            with col_int1:
+                                st.metric("Prediction Score", f"{interpretation['prediction']:.1%}")
+                            with col_int2:
+                                st.metric("Risk Level", interpretation['risk_level'])
+                            with col_int3:
+                                risk_emoji = "🔴" if interpretation['risk_level'] == "HIGH" else "🟡" if interpretation['risk_level'] == "MODERATE" else "🟢"
+                                st.metric("Status", risk_emoji)
+                            
+                            st.markdown(f"**Assessment:** {interpretation['prediction_phrase']}")
+                            st.markdown("**Key Contributing Factors:**")
+                            for i, factor in enumerate(interpretation['key_factors'], 1):
+                                st.markdown(f"{i}. {factor}")
+                            st.markdown(f"**Clinical Assessment:**\n{interpretation['overall_assessment']}")
+                else:
+                    st.warning("Unable to generate SHAP explanation for this prediction")
+            else:
+                st.info("SHAP analysis requires trained models. Models will be loaded on next prediction.")
+        
+        except Exception as e:
+            st.warning(f"SHAP analysis temporarily unavailable: {str(e)[:100]}")
         
         st.divider()
         

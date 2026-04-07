@@ -6,8 +6,16 @@ Provides offline question-answering capability without API dependency
 import os
 from typing import Optional, List, Dict
 
+# Suppress transformers warnings
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+
 # Try to use transformers for local inference
 try:
+    import os
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow logs
+    
     from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
     HAS_TRANSFORMERS = True
 except ImportError:
@@ -109,8 +117,12 @@ class LocalChatbot:
             model_name = "distilgpt2"
             print(f"Loading {model_name}...")
             
-            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.model = AutoModelForCausalLM.from_pretrained(model_name)
+            # Suppress all warnings while loading model
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore')
+                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+                self.model = AutoModelForCausalLM.from_pretrained(model_name)
             
             print("✅ Local model loaded successfully!")
         except Exception as e:

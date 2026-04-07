@@ -1,0 +1,30 @@
+# Medical AI System - Streamlit App Dependencies
+# Created for multi-page medical interface with SHAP explainability
+
+# Core Streamlit Framework
+streamlit==1.25.0
+streamlit-option-menu==0.3.12
+
+# Data Processing
+pandas==2.1.0
+numpy==1.24.3
+
+# Visualization
+plotly==5.16.1
+kaleido==0.2.1
+
+# API Communication
+requests==2.31.0
+urllib3==2.0.4
+
+# Optional: Data Export
+openpyxl==3.1.2
+
+# Optional: Environment Configuration
+python-dotenv==1.0.0
+
+# Optional: Enhanced UI
+streamlit-lottie==0.0.5
+
+# Type support
+typing-extensions>=4.7.0

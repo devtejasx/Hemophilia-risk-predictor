@@ -46,19 +46,70 @@ def load_models():
         model_path = "rf.pkl"  # Adjust path as needed
         
         if Path(model_path).exists():
-            service = PredictionService(
-                model_path=model_path,
-                explainability_enabled=True
-            )
+            try:
+                service = PredictionService(
+                    model_path=model_path,
+                    explainability_enabled=True
+                )
+                if service.model is not None:
+                    st.session_state.prediction_service = service
+                    return service
+            except Exception as load_error:
+                logger.error(f"Failed to load service with model: {load_error}")
+        
+        # Model not found or failed to load, use mock
+        st.warning(f"⚠️ Model file not found or failed to load: {model_path}")
+        st.info("Creating a mock model for demonstration purposes...")
+        
+        try:
+            from sklearn.ensemble import RandomForestClassifier
+            import joblib
+            
+            # Create a simple mock model
+            mock_model = RandomForestClassifier(n_estimators=50, random_state=42)
+            
+            # Create a mock service - pass empty string to avoid None errors
+            from backend.services.prediction import PredictionService as PS
+            service = PS.__new__(PS)  # Create instance without __init__
+            service.model = mock_model
+            service.explainability_enabled = True
+            service.explainer = None
+            service.background_data = None
+            service.feature_names = []
+            
             st.session_state.prediction_service = service
+            st.success("✅ Mock model ready for demo")
             return service
-        else:
-            st.warning(f"Model file not found: {model_path}")
+        except Exception as mock_error:
+            st.error(f"Could not create mock model: {str(mock_error)}")
+            logger.error(f"Failed to create mock model: {str(mock_error)}")
             return None
+            
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         logger.error(f"Failed to load models: {str(e)}")
-        return None
+        
+        # Try fallback to mock model
+        try:
+            from sklearn.ensemble import RandomForestClassifier
+            from backend.services.prediction import PredictionService as PS
+            
+            st.info("Using mock model for demonstration...")
+            mock_model = RandomForestClassifier(n_estimators=50, random_state=42)
+            
+            service = PS.__new__(PS)  # Create instance without __init__
+            service.model = mock_model
+            service.explainability_enabled = True
+            service.explainer = None
+            service.background_data = None
+            service.feature_names = []
+            
+            st.session_state.prediction_service = service
+            return service
+        except Exception as fallback_error:
+            st.error(f"Fallback failed: {str(fallback_error)}")
+            logger.error(f"Fallback model creation failed: {str(fallback_error)}")
+            return None
 
 
 def render_prediction_input_form() -> Optional[Dict[str, Any]]:
