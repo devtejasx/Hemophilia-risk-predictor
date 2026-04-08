@@ -1,0 +1,7 @@
+exon,age_first_treatment,dose_intensity,exposure_days,mutation_code,mutation_severity,exon_risk,cumulative_exposure,exposure_risk,age_risk,severity_code,mutation_severity_interaction,treatment_genetics_interaction,mutation_type_frameshift,mutation_type_intron22,mutation_type_missense,mutation_type_nonsense,severity_mild,severity_moderate,severity_severe
+11,5,88,35,4,4,1.0,30.8,1,1,3,12,1.232,False,False,False,True,False,False,True
+4,8,45,20,3,3,1.0,9.0,0,2,2,6,0.27,False,False,True,False,False,True,False
+22,1,88,40,1,1,1.0,35.2,1,0,3,3,0.35200000000000004,False,True,False,False,False,False,True
+7,9,50,18,5,5,1.0,9.0,0,2,1,5,0.44999999999999996,True,False,False,False,True,False,False
+22,10,90,40,1,1,1.0,36.0,1,2,3,3,0.36,False,True,False,False,False,False,True
+3,7,20,8,3,3,1.0,1.6,0,2,2,6,0.048,False,False,True,False,False,True,False
