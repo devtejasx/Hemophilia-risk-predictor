@@ -1,10 +1,19 @@
-.venv/
-.streamlit/secrets.toml
-patients.csv
-report.pdf
+# Python
 __pycache__/
 *.pyc
-*.pkl
-*.db
-*.csv
-.env
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.env/
+
+# Streamlit
+.streamlit/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
