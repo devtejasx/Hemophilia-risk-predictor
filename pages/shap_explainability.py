@@ -13,10 +13,22 @@ Features:
 - Prediction comparison and cohort analysis
 """
 
+import sys
+import os
+import warnings
+import logging
+
+# Aggressive suppression of transformers warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+warnings.filterwarnings('ignore')
+warnings.simplefilter('ignore')
+logging.getLogger('transformers').setLevel(logging.ERROR)
+logging.getLogger('torch').setLevel(logging.ERROR)
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any

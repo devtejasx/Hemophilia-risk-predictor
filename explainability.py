@@ -222,11 +222,19 @@ class SHAPExplainer:
             feature_names = X.columns.tolist() if hasattr(X, 'columns') else [f"Feature_{i}" for i in range(X.shape[1])]
         
         # Mean absolute SHAP value = importance
-        importance = np.abs(self.shap_values).mean(axis=0)
+        # Handle both 2D and 3D SHAP values (3D for multi-class, 2D for binary)
+        shap_abs = np.abs(self.shap_values)
+        if shap_abs.ndim == 3:
+            # Multi-class: take mean across samples and classes
+            importance = shap_abs.mean(axis=(0, 2))
+        else:
+            # Binary classification: take mean across samples
+            importance = shap_abs.mean(axis=0)
+        
         importance_dict = dict(zip(feature_names, importance))
         
         # Sort by importance
-        importance_dict = dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True))
+        importance_dict = dict(sorted(importance_dict.items(), key=lambda x: float(x[1]), reverse=True))
         
         return importance_dict
     

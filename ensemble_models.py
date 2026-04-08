@@ -156,14 +156,13 @@ class EnsembleModelRegistry:
             eval_metric='AUC',
             random_seed=self.random_state,
             verbose=0,
-            use_best_model=True,
-            auto_class_weights='balanced'
+            auto_class_weights='Balanced'
         )
         self.hyperparameters['CatBoost'] = {
             'depth': depth,
             'iterations': iterations,
             'learning_rate': learning_rate,
-            'auto_class_weights': 'balanced'
+            'auto_class_weights': 'Balanced'
         }
         return model
     
@@ -310,7 +309,7 @@ class EnsembleTrainer:
         # 3. CatBoost
         print("3️⃣  CatBoost...")
         catboost_model = self.registry.create_catboost()
-        catboost_model.fit(X_train, y_train, verbose=0)
+        catboost_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=0)
         self.trained_models['CatBoost'] = catboost_model
         results['CatBoost'] = self._evaluate_model(catboost_model, X_train, y_train, X_val, y_val, 'CatBoost')
         
