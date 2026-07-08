@@ -1,402 +1,205 @@
-# 🏥 Hemophilia AI Platform - Complete Setup Guide
+# Hemophilia Risk Predictor
 
-## 📋 Overview
+![Streamlit](https://img.shields.io/badge/Streamlit-1.55-FF4B4B?logo=streamlit&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![Status](https://img.shields.io/badge/status-prototype-yellow)
 
-This is an advanced AI-powered clinical intelligence platform for hemophilia management featuring:
-- **Real GPT-4 Powered Chatbot** for clinical decision support
-- **Doctor Dashboard** with comprehensive analytics and patient management
-- **SQL Database** for persistent data storage
-- **ML-based Risk Prediction** using Random Forest and XGBoost
-- **Multi-page Streamlit Application**
+A Streamlit-based demo UI for a hypothetical hemophilia clinical risk-assessment tool. This README documents **what is actually deployed and runnable today**, verified directly against the code and deployment config — not the more ambitious system described in this repo's many other docs (see [Repository State](#repository-state--important) below, which you should read before relying on anything else in this repo).
 
----
+## Table of Contents
 
-## 🚀 Installation & Setup
+- [Repository State (important)](#repository-state--important)
+- [What Actually Runs](#what-actually-runs)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration-environment-variables)
+- [Running Locally](#running-locally)
+- [Running with Docker](#running-with-docker-experimental-unused-path)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Security Considerations](#security-considerations)
+- [Troubleshooting](#troubleshooting)
+- [Known Issues / Inconsistencies](#known-issues--inconsistencies)
+- [Contributing](#contributing)
+- [License](#license)
+- [Future Improvements](#future-improvements)
 
-### 1. **Install Required Packages**
+## Repository State (important)
+
+This repository contains **at least four different, mutually inconsistent stories about what the application is**, plus roughly 100 top-level markdown files documenting features that are not present in the code that's actually deployed. Before using this repo, understand:
+
+1. **What's actually deployed** (per `Procfile` and `render.yaml`): a single-file Streamlit app, `app.py`, run standalone with no backend service.
+2. **What the previous root README described**: a "Hemophilia AI Platform" with a real GPT-4 chatbot, a SQL database with 6 tables, ML risk prediction via `rf.pkl`/`xgb.pkl`, and PDF report generation. **This does not match `app.py`.**
+3. **What `docker-compose.yml` describes**: a split architecture — `app_frontend.py` (Streamlit) calling `backend_api.py` (FastAPI) over HTTP, plus a placeholder database container. This is a real, self-consistent architecture, but it is **not** what `Procfile`/`render.yaml` deploy.
+4. **What `clean_project/` describes**: a from-scratch modular rewrite (its own `README.md` frames it as "v2.0", consolidating "8 duplicate app files, 4 duplicate API files, 8 auth modules, 5 chatbot implementations" into one app). It is fully self-contained but **not referenced by anything outside its own folder** — nothing wires it up as the real entrypoint.
+
+This README documents story #1 (the one that's actually live), and calls out the others so you don't spend time debugging code paths that were never wired into deployment.
+
+## What Actually Runs
+
+`app.py` at the repo root, verified by reading it directly:
+
+- A **single-page Streamlit app** (auto-logs in a hardcoded user, "Dr. Sarah Chen" — there is no real authentication).
+- Patient data is **hardcoded in-memory** (`PAT001`, `PAT002`, `PAT003`) — there is no database read/write despite `hemophilia.db` and `hemophilia_clinic.db` files sitting in the repo.
+- "Risk prediction" is a hand-written weighted formula over `numpy.random` values (`generate_sample_prediction()`) — **no ML model is loaded**. `app.py` imports `pickle` but never calls `pickle.load`, and none of the 14 committed `.pkl` files (`catboost.pkl`, `rf.pkl`, `xgb.pkl`, `lightgbm.pkl`, ensemble models, etc.) are read anywhere in this file.
+- SHAP explainability charts are **hardcoded static numbers**, not real SHAP output, despite `shap` being a dependency.
+- The chatbot is **simple keyword matching** (e.g. `if "help" in message`) — no OpenAI/GPT-4 call, despite prior docs describing a GPT-4 integration.
+
+In short: this is a UI mockup with realistic-looking but fabricated data, useful for demoing the intended workflow, not a working clinical risk model.
+
+## Tech Stack
+
+From the root `requirements.txt` (a full `pip freeze` dump, ~140 packages — see [Known Issues](#known-issues--inconsistencies)):
+
+- **Streamlit 1.55** — the only UI actually deployed
+- **Plotly** — charts within `app.py`
+- **pandas / numpy** — data handling
+- Present as dependencies but **not exercised by the deployed app**: `fastapi`, `uvicorn`, `scikit-learn`, `xgboost`, `shap`, `torch`, `transformers`, a full Supabase client stack (`supabase`, `postgrest`, `realtime`, `storage3`), `SQLAlchemy`, `psycopg2-binary`, `python-jose`, `reportlab`, `pygame`, `pytest`
+
+## Project Structure
+
+```
+Hemophilia-risk-predictor/
+├── app.py                    # ACTUAL deployed entrypoint (Procfile/render.yaml) — mock Streamlit demo
+├── requirements.txt           # full pip-freeze dump used by the real deployment
+├── Procfile / render.yaml     # deploy app.py as a standalone Streamlit service
+├── build.sh                    # pip install -r requirements.txt
+├── runtime.txt                 # python-3.11.9 (conflicts with .python-version, see Known Issues)
+│
+├── app_backup.py, app_frontend.py, app_optimized.py,
+│   app_refactored.py, app_unified.py, app_updated.py    # unused alternate/iterated versions of app.py
+├── api.py, api_optimized.py, api_production.py, api_updated.py  # unused alternate FastAPI stubs
+│
+├── backend/                   # a full FastAPI package (auth, routers, services) — not deployed
+├── fastapi_backend/           # a SECOND, independent FastAPI package with its own docs — not deployed
+├── backend_api.py             # a THIRD standalone FastAPI app — only used via Dockerfile.backend
+│
+├── frontend/                  # separate Vite + React + TypeScript SPA, expects a backend on :8000/api — not deployed
+├── clean_project/              # self-contained "v2.0" modular rewrite — not wired to anything outside itself
+│
+├── pages/, streamlit_pages/    # two separate sets of Streamlit multipage files, neither imported by app.py
+├── components/, services/, styles/, utils/   # root-level packages, duplicated again inside clean_project/
+│
+├── *.pkl                       # 14 committed model artifacts, unused by the deployed app.py
+├── hemophilia.db, hemophilia_clinic.db       # committed SQLite DBs, unused by the deployed app.py
+├── champ.csv, clinical.csv, genomic.csv, X_test.csv, y_test.csv, ...  # committed datasets
+├── catboost_info/              # committed CatBoost training logs
+│
+├── docker-compose.yml, Dockerfile.backend, Dockerfile.frontend  # describes a DIFFERENT architecture
+│                                                                    (app_frontend.py + backend_api.py), not used by Procfile/render.yaml
+│
+└── ~100 top-level *.md files   # overlapping guides/summaries for features not present in the deployed app
+```
+
+## Prerequisites
+
+- Python 3.11 (matches `runtime.txt`, used by the real Render deployment)
+
+## Installation
 
 ```bash
+git clone https://github.com/devtejasx/Hemophilia-risk-predictor.git
+cd Hemophilia-risk-predictor
 pip install -r requirements.txt
 ```
 
-**Key packages:**
-- `streamlit==1.28.1` - Web framework
-- `openai==1.3.5` - GPT-4 API client
-- `python-dotenv==1.0.0` - Environment variables
-- `pandas==2.0.3` - Data manipulation
-- `scikit-learn==1.3.2` - Machine learning
-- `plotly`, `matplotlib` - Visualization
-- `reportlab==4.0.7` - PDF generation
+## Configuration (Environment Variables)
 
-### 2. **Configure OpenAI API Key**
+`render.yaml` declares one env var for the deployed service:
 
-Create a `.env` file in the project root:
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Declared in `render.yaml`/`.env.example`, but **not actually read anywhere in `app.py`** — the deployed chatbot uses keyword matching, not the OpenAI API. |
 
-```env
-OPENAI_API_KEY=your_actual_openai_api_key_here
-```
+`.env.example` at the root additionally documents a large set of production-style settings (`DATABASE_URL`, SMTP, Sentry/Datadog keys, rate limiting, etc.) that correspond to the `backend_api.py`/`fastapi_backend/` code paths, not to the deployed `app.py`. If you're only running `app.py`, none of these are required.
 
-**To get an API key:**
-1. Go to https://platform.openai.com/api-keys
-2. Click "Create new secret key"
-3. Copy and paste it into `.env`
+## Running Locally
 
-### 3. **Initialize Database**
-
-The database is automatically initialized on first run. It creates:
-- `patients` - Patient demographic and clinical data
-- `conversations` - Chatbot conversation history
-- `doctor_notes` - Clinical notes from doctors
-- `monitoring_records` - Lab and monitoring data
-- `treatment_history` - Treatment logs
-- `dashboard_analytics` - System analytics
-
----
-
-## 📱 Application Pages
-
-### 1. **📋 Patient Form**
-- Comprehensive patient intake form
-- 6 sections covering demographics, genetics, treatment, medical history, health status, and lifestyle
-- ML-based risk prediction using trained models
-- Automatic PDF report generation
-
-### 2. **📊 Results**
-- Detailed risk analysis and predictions
-- Feature importance visualization using SHAP
-- Clinical interpretation and recommendations
-- Export capabilities
-
-### 3. **📈 History**
-- Complete patient database management
-- Filtering by severity, mutation, and risk
-- Statistical analysis and trends
-- CSV export functionality
-
-### 4. **🤖 Chatbot (NEW - GPT-4 POWERED)**
-- Real-time AI medical assistant powered by GPT-4
-- Context-aware responses based on patient data
-- Three specialized buttons:
-  - **Clinical Recommendations** - Generates comprehensive treatment plans
-  - **Inhibitor Risk Analysis** - Detailed genetic and immunological analysis
-  - **Monitoring Data Analysis** - Analytics on patient monitoring records
-- Doctor note integration
-- Conversation history stored in database
-
-### 5. **🏥 Doctor Dashboard (NEW)**
-
-#### **Tab 1: Patient Directory**
-- View all registered patients
-- Risk stratification with color-coded indicators
-- Detailed patient profiles
-- Doctor note management
-- Add/edit clinical notes
-
-#### **Tab 2: Clinical Notes**
-- Browse notes by category (General, Inhibitor, Treatment, Monitoring)
-- Filter by patient or severity
-- Organized chronological display
-
-#### **Tab 3: Analytics & Trends**
-- Risk score distribution histogram
-- Severity breakdown pie chart
-- Mutation type analysis
-- Adherence vs Risk scatter plot
-
-#### **Tab 4: Search & Filter**
-- Search by patient name
-- Filter by risk level, mutation type, or severity
-- Quick statistics for each filter
-
-#### **Tab 5: Utilities**
-- Export all patient data to CSV
-- Generate system-wide reports
-- Database refresh options
-
----
-
-## 🤖 GPT-4 Chatbot Features
-
-### How It Works
-1. Analyzes patient clinical context (mutation, severity, exposure, risk)
-2. Retrieves relevant conversation history
-3. Sends patient context + conversation + new message to GPT-4
-4. Returns clinical decision support recommendations
-5. Stores all conversations in database for continuity of care
-
-### Example Interactions
-- **"What's the prognosis for this patient?"** → Analyzes risk factors and provides outlook
-- **"Should we change treatment?"** → Reviews current dose, adherence, risk level, recommends adjustments
-- **"What monitoring should we do?"** → Creates personalized monitoring schedule
-- **"Generate clinical recommendations"** → Produces comprehensive care plan
-
-### Clinical Safety Features
-- System prompt emphasizes evidence-based medicine
-- Includes disclaimers that AI supplements, not replaces, clinical judgment
-- Maintains conversation history for accountability
-- All responses stored in database for audit trail
-
----
-
-## 💾 Database Operations
-
-### Python API Usage
-
-```python
-from database import *
-
-# Add a patient
-patient_data = {
-    'Name': 'John Doe',
-    'Age': 25,
-    'Severity': 'Severe',
-    'Mutation': 'Intron22',
-    'Risk_Score': 0.75
-}
-patient_id = add_patient(patient_data)
-
-# Retrieve patient
-patient = get_patient(patient_id)
-
-# Get all patients
-all_patients = get_all_patients()
-
-# Add conversation
-add_conversation(patient_id, "user message", "gpt response", "general")
-
-# Get conversation history
-history = get_conversation_history(patient_id, limit=50)
-
-# Add doctor note
-add_doctor_note(patient_id, "Dr. Smith", "Note content", "Treatment", "Important")
-
-# Get doctor notes
-notes = get_doctor_notes(patient_id)
-
-# Get dashboard stats
-stats = get_dashboard_stats()
-```
-
-### Database File
-- Location: `hemophilia_clinic.db`
-- Format: SQLite3
-- Automatically created on first run
-- Can be backed up like any regular file
-
----
-
-## 🤖 GPT Chatbot API Usage
-
-```python
-from gpt_chatbot import *
-
-# Generate response with patient context
-response = create_gpt_response(
-    user_message="What's the treatment plan?",
-    patient_context=patient_data,
-    conversation_history=past_messages
-)
-
-# Get clinical recommendations
-recommendations = get_clinical_recommendations(patient_data)
-
-# Analyze monitoring data
-analysis = analyze_monitoring_data(patient_data, monitoring_records)
-
-# Generate risk explanation
-risk_explanation = generate_inhibitor_risk_explanation(
-    patient_data,
-    risk_factors_dict
-)
-```
-
----
-
-## 🔧 Configuration
-
-### Environment Variables (.env)
-```env
-OPENAI_API_KEY=sk-...               # Required for GPT features
-APP_NAME=Hemophilia AI Platform     # Optional
-DEBUG=False                          # Optional
-LOG_LEVEL=INFO                       # Optional
-```
-
-### Modify Model Behavior
-Edit `gpt_chatbot.py` `SYSTEM_PROMPT` to customize AI personality and guidelines.
-
----
-
-## 📊 Feature Importance & Risk Factors
-
-The ML models consider:
-- **Mutation Type** (Strongest factor) - Intron22 has highest inhibitor risk
-- **Severity** - Severe cases require more intensive management
-- **Exposure Days** - Early exposures carry highest risk
-- **Age** - Younger patients may have different risk profiles
-- **Family History** - Genetic predisposition
-- **Treatment Adherence** - Compliance affects outcomes
-- **Baseline Factor Level** - Clinical marker
-- **Immunological factors** - Infections, vaccinations
-- **Lifestyle factors** - Physical activity, stress
-
----
-
-## 🚨 Important Notes
-
-### API Key Security
-- Never commit `.env` file to version control
-- Use `.gitignore` to exclude it
-- Keep your API key private
-- Regenerate if accidentally exposed
-
-### OpenAI Costs
-- GPT-4 is more expensive than GPT-3.5
-- App has fallback to GPT-3.5 if GPT-4 unavailable
-- Monitor your API usage at https://platform.openai.com/account/usage
-
-### Database Backup
-```bash
-# Backup database
-cp hemophilia_clinic.db hemophilia_clinic_backup_$(date +%Y%m%d).db
-
-# Export to CSV
-# Use Dashboard → Utilities → Export All Patients
-```
-
----
-
-## 🎯 Clinical Workflow
-
-### Typical Use Case
-
-1. **Patient Intake** (Patient Form)
-   - Enter comprehensive patient data
-   - Run ML risk prediction
-   - View initial assessment
-
-2. **Analysis** (Results Page)
-   - Review feature importance
-   - Understand risk drivers
-   - Generate PDF report
-
-3. **Clinical Consultation** (Chatbot)
-   - Ask GPT-4 for clinical recommendations
-   - Get inhibitor risk analysis
-   - Review monitoring protocols
-
-4. **Documentation** (Doctor Dashboard)
-   - Add clinical notes
-   - Track monitoring data
-   - Review patient history
-
-5. **Analytics** (Doctor Dashboard Analytics)
-   - Identify trends
-   - Compare populations
-   - Export for research
-
----
-
-## 🐛 Troubleshooting
-
-### API Key Issues
-```
-Error: OpenAI API key not configured
-Solution: Create .env file with OPENAI_API_KEY=your_key
-```
-
-### Database Lock
-```
-Error: database is locked
-Solution: Close other instances accessing the database, restart app
-```
-
-### Missing Packages
-```
-Error: ModuleNotFoundError: No module named 'streamlit'
-Solution: pip install -r requirements.txt
-```
-
-### GPT Timeout
-```
-Error: API request timeout
-Solution: Check internet connection, RobustError likely network issue
-```
-
----
-
-## 📚 File Structure
-
-```
-.
-├── app.py                    # Main Streamlit application
-├── database.py               # Database operations and schema
-├── gpt_chatbot.py           # GPT-4 integration
-├── requirements.txt         # Python dependencies
-├── .env.example             # Environment template
-├── .env                     # Environment variables (create this)
-├── hemophilia_clinic.db     # SQLite database (auto-created)
-├── rf.pkl                   # Random Forest model
-├── xgb.pkl                  # XGBoost model
-├── columns.pkl              # Feature column names
-├── patients.csv             # Historical patient CSV
-├── clinical.csv             # Clinical data CSV
-├── genomic.csv              # Genomic data CSV
-└── README.md                # This file
-```
-
----
-
-## 🚀 Running the Application
-
-### Start the app
 ```bash
 streamlit run app.py
 ```
 
-### Access in browser
-- Local: `http://localhost:8501`
-- Remote: Use `streamlit config` to customize
+Opens at `http://localhost:8501`. No `.env`, database, or model files are required for this to work, since `app.py` doesn't read any of them.
 
-### For production deployment
+## Running with Docker (experimental, unused path)
+
+`docker-compose.yml` defines a three-service topology that is **not the same application as `app.py`**:
+
 ```bash
-# Using Streamlit Cloud, AWS, GCP, Azure, etc.
-# See: https://docs.streamlit.io/streamlit-community-cloud/deploy-your-app
+docker-compose up --build
 ```
 
----
+| Service | Runs | Port |
+|---|---|---|
+| `backend` | `backend_api.py` via `Dockerfile.backend` (uvicorn) | 8000 |
+| `frontend` | `app_frontend.py` via `Dockerfile.frontend` (Streamlit), configured with `API_BASE_URL=http://backend:8000` | 8501 |
+| `db` | a bare Alpine placeholder container — does not actually run a database engine | — |
 
-## 📞 Support & Documentation
+This is a coherent design for a real frontend/backend split, but it's disconnected from what `Procfile`/`render.yaml` actually deploy, and the `db` service is a stub.
 
-- **Streamlit Docs**: https://docs.streamlit.io/
-- **OpenAI Docs**: https://platform.openai.com/docs/
-- **SQLite Docs**: https://www.sqlite.org/docs.html
-- **Scikit-learn**: https://scikit-learn.org/stable/
+## Testing
 
----
+No real automated test suite exists. Three loose scripts sit at the repo root:
+- `auth_test.py`, `test_model_loading.py`, `test_pickle_load.py` — manual smoke-test scripts (print statements, no `assert`s, not organized as a pytest suite)
 
-## ✅ Checklist for First-Time Setup
+There is no `tests/` directory, no `pytest.ini`/`conftest.py`, and no CI to run anything. `clean_project/README.md` references `pytest --cov` and a `tests/` folder, but that test infrastructure does not exist in the repo.
 
-- [ ] Python 3.8+ installed
-- [ ] Requirements installed (`pip install -r requirements.txt`)
-- [ ] OpenAI account created (https://platform.openai.com)
-- [ ] API key generated and added to `.env`
-- [ ] `.env` file created in project root
-- [ ] `.env` added to `.gitignore`
-- [ ] Models trained (rf.pkl, xgb.pkl, columns.pkl exist)
-- [ ] Run `streamlit run app.py`
-- [ ] Test chatbot with sample patient
-- [ ] Verify database created (hemophilia_clinic.db)
-- [ ] Test Doctor Dashboard features
+## Deployment
 
----
+The only deployment path actually configured:
 
-## 🎉 You're All Set!
+1. **Render** (`render.yaml`): builds via `build.sh` (`pip install -r requirements.txt`), starts with `streamlit run app.py --server.port=$PORT --server.headless=true --server.enableCORS=false`.
+2. **Procfile** (Heroku-style): identical `streamlit run app.py` command.
 
-Your hemophilia AI clinical platform is now ready for use. Start by:
-1. Creating a test patient in Patient Form
-2. Running risk prediction
-3. Chatting with GPT-4 in Chatbot
-4. Exploring Doctor Dashboard
+Both deploy the mock demo described in [What Actually Runs](#what-actually-runs) — no backend, no database, no ML inference.
 
-Enjoy your advanced AI-powered clinical intelligence system!
+## Security Considerations
+
+- The deployed `app.py` **auto-logs in a hardcoded user** with no credential check — there is no real authentication on the live path.
+- `.gitignore` excludes `.env/` (a directory) but **not `.env`** (a file) — if a real `.env` were ever created here, it would not be excluded from git by the current `.gitignore`.
+- `.gitignore` also lists `.streamlit/` as ignored, yet `.streamlit/config.toml` is committed anyway — the ignore rule was added after the file was already tracked.
+- Real secrets-handling code exists (`auth_security.py`, `security.py`, `backend/security.py`, JWT/bcrypt dependencies) but belongs to the unused `backend`/`fastapi_backend`/`backend_api.py` paths, not the deployed app — don't assume the live app has this protection.
+- Sample/synthetic patient data is committed (`champ.csv`, `clinical.csv`, `genomic.csv`, `patients_backup_20260327_124514.csv`) — confirm this is genuinely synthetic before treating it as safe to keep in a public repo, given the healthcare subject matter.
+
+## Troubleshooting
+
+- **"Where's the real ML prediction?"** — there isn't one wired up in the deployed app; see [What Actually Runs](#what-actually-runs).
+- **`streamlit run app.py` shows different behavior than the old README described** — the old README documented a different, unimplemented version of the app; trust this README and the code instead.
+- **Python version mismatches** — `.python-version` says `3.10.13` while `runtime.txt` (used by Render) says `python-3.11.9`. Use 3.11 to match what's actually deployed.
+- **`requirements.txt` fails to parse in some editors** — the file is UTF-16LE encoded (an artifact of `pip freeze > requirements.txt` on Windows PowerShell); re-save as UTF-8 if you need to hand-edit it.
+
+## Known Issues / Inconsistencies
+
+Flagged here rather than silently fixed, since resolving them requires deciding which of the competing implementations is the "real" project:
+
+1. **The deployed app doesn't match any of the project's own documentation.** The (previous) root README, `clean_project/README.md`, and the various `*_SUMMARY.md`/`*_GUIDE.md` files describe GPT-4 chatbots, real ML models, and database persistence that don't exist in the code path Render/Procfile actually run.
+2. **At least 4 competing "canonical app" implementations**, none pointing to each other: root `app.py` (deployed), `clean_project/app.py` (self-described rewrite, unreferenced), `docker-compose.yml`'s `app_frontend.py` + `backend_api.py` pair (a different real architecture, unreferenced by the Streamlit-only deploy), and a React `frontend/` SPA expecting a backend on port 8000 (also unreferenced by the deploy).
+3. **Three separate, non-shared FastAPI backends** exist: `backend/`, `fastapi_backend/`, and root `backend_api.py`. They overlap in responsibility (patients, predictions, chat, auth) but share no code.
+4. **Six or more alternate/duplicate app files** (`app_backup.py`, `app_optimized.py`, `app_refactored.py`, `app_unified.py`, `app_updated.py`, plus 4 `api*.py` variants) sit at the root with no indication of which — if any — should be kept.
+5. **14 `.pkl` model files, 2 SQLite databases, and 8 CSV datasets are committed directly to git**, none of them read by the deployed `app.py`.
+6. **~100 top-level markdown files** with heavy overlap (e.g. 5 `AUTHENTICATION_*.md` files, 8 `SHAP_*.md` files, 4 `FASTAPI_*.md` files) make it very hard to find authoritative information.
+7. **Inconsistent Python version pinning** — `.python-version` (3.10.13) vs `runtime.txt` (3.11.9).
+8. **`.gitignore` gaps** — doesn't exclude `.env` (only `.env/`), and excludes `.streamlit/` after `.streamlit/config.toml` was already committed.
+9. **7 different `requirements*.txt` files** at various paths (`requirements.txt`, `requirements_auth.txt`, `requirements_optimized.txt`, `requirements_production.txt`, `requirements_streamlit.txt`, `backend/requirements.txt`, `fastapi_backend/requirements.txt`, `clean_project/requirements.txt`) with no documentation of which applies where.
+10. **No LICENSE file, no `.github/` CI workflows, no real automated test suite.**
+
+## Contributing
+
+1. Fork the repository
+2. Before adding new features, read [Repository State](#repository-state--important) — pick one of the existing implementations to build on rather than adding a fifth
+3. Open a pull request
+
+## License
+
+No `LICENSE` file exists in this repository.
+
+## Future Improvements
+
+- Pick one canonical implementation (the deployed `app.py`, the `docker-compose.yml` split architecture, or `clean_project/`) and delete or clearly archive the others
+- Wire the deployed app to an actual trained model (the `.pkl` files already exist) instead of `numpy.random`-based mock predictions
+- Consolidate the ~100 markdown files into a single, current set of docs
+- Remove committed model/database/dataset artifacts from git history if they contain anything beyond synthetic sample data, and add them to `.gitignore` going forward
+- Fix the `.env` gitignore gap and the Python version mismatch
+- Add a real automated test suite and CI
