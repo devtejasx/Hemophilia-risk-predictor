@@ -28,7 +28,7 @@ A Streamlit-based demo UI for a hypothetical hemophilia clinical risk-assessment
 
 ## Repository State (important)
 
-This repository contains **at least four different, mutually inconsistent stories about what the application is**, plus roughly 100 top-level markdown files documenting features that are not present in the code that's actually deployed. Before using this repo, understand:
+This repository contains **at least four different, mutually inconsistent stories about what the application is**, plus roughly 100 one-shot markdown documents (now parked under `archive/session-docs/`) describing features that are not present in the code that's actually deployed. Before using this repo, understand:
 
 1. **What's actually deployed** (per `Procfile` and `render.yaml`): a single-file Streamlit app, `app.py`, run standalone with no backend service.
 2. **What the previous root README described**: a "Hemophilia AI Platform" with a real GPT-4 chatbot, a SQL database with 6 tables, ML risk prediction via `rf.pkl`/`xgb.pkl`, and PDF report generation. **This does not match `app.py`.**
@@ -68,9 +68,8 @@ Hemophilia-risk-predictor/
 ├── build.sh                    # pip install -r requirements.txt
 ├── runtime.txt                 # python-3.11.9 (conflicts with .python-version, see Known Issues)
 │
-├── app_backup.py, app_frontend.py, app_optimized.py,
-│   app_refactored.py, app_unified.py, app_updated.py    # unused alternate/iterated versions of app.py
-├── api.py, api_optimized.py, api_production.py, api_updated.py  # unused alternate FastAPI stubs
+├── app_frontend.py            # Streamlit UI for the docker-compose path
+├── archive/                    # one-shot session docs + superseded app/api variants (see archive/README.md)
 │
 ├── backend/                   # a full FastAPI package (auth, routers, services) — not deployed
 ├── fastapi_backend/           # a SECOND, independent FastAPI package with its own docs — not deployed
