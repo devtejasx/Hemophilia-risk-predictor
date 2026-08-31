@@ -1,0 +1,123 @@
+{
+  "model_version": "champ-v1",
+  "model_type": "CalibratedClassifierCV(isotonic) over random_forest",
+  "training_date": "2026-08-31T12:01:19.534864+00:00",
+  "preprocessing_version": "champ-preprocessing-1",
+  "dataset": {
+    "name": "CHAMP",
+    "description": "CDC Hemophilia A Mutation Project variant registry",
+    "file": "ml\\data\\champ.csv",
+    "file_sha256": "73aced5b169904a54af37f1372b32eccd52d4d288f69190a1892263a50e016dd",
+    "unit_of_observation": "F8 variant (NOT an individual patient)",
+    "label_column": "History of Inhibitor",
+    "n_total": 4050,
+    "n_labelled": 2296,
+    "n_positive": 461,
+    "positive_rate": 0.200784,
+    "n_excluded_unlabelled": 1754,
+    "excluded_values": {
+      "not reported": 1742,
+      "(missing)": 12
+    },
+    "caveat": "Rows without a reported inhibitor history are excluded. That exclusion is very unlikely to be random, so the positive rate describes this registry's reporting, not population incidence."
+  },
+  "features": {
+    "n": 47,
+    "names": [
+      "cat__Variant Type_Frameshift",
+      "cat__Variant Type_Large structural change (>50 bp)",
+      "cat__Variant Type_Missense",
+      "cat__Variant Type_Nonsense",
+      "cat__Variant Type_Small structural change (in-frame, <50 bp)",
+      "cat__Variant Type_Splice site change",
+      "cat__Variant Type_Synonymous",
+      "cat__Variant Type_infrequent_sklearn",
+      "cat__Mechanism_Deletion",
+      "cat__Mechanism_Deletion/Insertion",
+      "cat__Mechanism_Duplication",
+      "cat__Mechanism_Insertion",
+      "cat__Mechanism_Substitution",
+      "cat__Mechanism_infrequent_sklearn",
+      "cat__Domain_A1",
+      "cat__Domain_A2",
+      "cat__Domain_A3",
+      "cat__Domain_B",
+      "cat__Domain_C1",
+      "cat__Domain_C2",
+      "cat__Domain_Signal",
+      "cat__Domain_Unknown",
+      "cat__Domain_a1",
+      "cat__Domain_a2",
+      "cat__Domain_a3",
+      "cat__Domain_infrequent_sklearn",
+      "cat__Subtype_Heavy chain",
+      "cat__Subtype_Light chain",
+      "cat__Subtype_Unknown",
+      "cat__Subtype_multiple domains",
+      "cat__Subtype_single domain",
+      "cat__Subtype_infrequent_sklearn",
+      "cat__In Poly A_N",
+      "cat__In Poly A_Unknown",
+      "cat__In Poly A_Y",
+      "cat__Reported Clinical Severity_Mild",
+      "cat__Reported Clinical Severity_Mild/Moderate",
+      "cat__Reported Clinical Severity_Moderate",
+      "cat__Reported Clinical Severity_Moderate/Severe",
+      "cat__Reported Clinical Severity_Not reported",
+      "cat__Reported Clinical Severity_Severe",
+      "cat__Reported Clinical Severity_infrequent_sklearn",
+      "num__exon_number",
+      "num__codon_number",
+      "num__missingindicator_exon_number",
+      "num__missingindicator_codon_number",
+      "bin__is_intron"
+    ],
+    "source_columns": [
+      "Variant Type",
+      "Mechanism",
+      "Domain",
+      "Subtype",
+      "In Poly A",
+      "Reported Clinical Severity",
+      "exon_number",
+      "codon_number",
+      "is_intron"
+    ],
+    "excluded_columns": {
+      "HGVS cDNA": "near-unique identifier (2296 distinct values over 2296 labelled rows)",
+      "hg19 Coordinates": "near-unique genomic coordinate identifier",
+      "HGVS Protein": "near-unique identifier",
+      "Mature Protein": "near-unique identifier",
+      "Comments": "free text, ~96% null",
+      "Reference Number": "LEAKAGE: identifies the source publication, not the variant. Grouped by reference, some studies are 100% inhibitor-positive and others 0%, because inhibitor-focused papers report inhibitor-positive variants. Including it would let the model recover the label from the citation.",
+      "Year Reported": "reporting artifact rather than biology, and the column contains an out-of-range 0.0",
+      "Severe (<1 U/dL)": "45-90% null; superseded by Reported Clinical Severity",
+      "Moderate (1-5 U/dL)": "45-90% null; superseded by Reported Clinical Severity",
+      "Mild (>5 U/dL)": "45-90% null; superseded by Reported Clinical Severity",
+      "No FVIII level given": "45-90% null; superseded by Reported Clinical Severity",
+      "Newly Added in the Current Version": "registry bookkeeping"
+    }
+  },
+  "calibration": {
+    "method": "isotonic",
+    "cv": 5,
+    "fitted_on": "training split"
+  },
+  "threshold": {
+    "value": 0.17497797170639112,
+    "selected_on": "validation split",
+    "criterion": "max F1 on the validation split"
+  },
+  "library_versions": {
+    "python": "3.12.10",
+    "scikit_learn": "1.8.0",
+    "numpy": "2.5.2",
+    "pandas": "3.0.5"
+  },
+  "limitations": [
+    "CHAMP rows are F8 variants, not patients. Predictions are variant-attributable and are not an individual's probability.",
+    "1754 rows without a reported inhibitor history were excluded. That exclusion is very unlikely to be random, so metrics describe the reported subset of this registry.",
+    "Reference Number (source publication) was excluded as a leakage feature; some studies are 100% inhibitor-positive by selection.",
+    "No external validation cohort. Not clinically validated."
+  ]
+}

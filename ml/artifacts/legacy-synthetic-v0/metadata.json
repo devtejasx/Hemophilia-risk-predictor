@@ -1,0 +1,86 @@
+{
+  "model_version": "legacy-synthetic-v0",
+  "status": "preserved-not-servable",
+  "status_reason": "Preserved for provenance only. These artifacts were fitted on 30 fabricated rows (tests/fixtures/synthetic_*.csv) whose label is a deterministic function of mutation_type and severity, at a 24-train / 6-test split. Their 20-feature space includes age_first_treatment, dose_intensity, exposure_days and cumulative_exposure, none of which exist in CHAMP, so they cannot serve the CHAMP pipeline. See PROVENANCE.md.",
+  "provenance_warning": "Trained on fabricated data, not CHAMP. Any metric from this version is a property of a hand-written rule, not of biology.",
+  "model_type": "RandomForestClassifier (model_ensemble.pkl == rf.pkl, byte-identical)",
+  "training_date": "unknown - not recorded by the original pipeline",
+  "preprocessing_version": "none - preprocessing was inline in archive/legacy-ml/data_fusion.py",
+  "produced_by": "archive/legacy-ml/train.py",
+  "dataset": {
+    "name": "synthetic-fixture",
+    "description": "30 hand-written rows; not CHAMP, not clinical data",
+    "files": [
+      "tests/fixtures/synthetic_genomic.csv",
+      "tests/fixtures/synthetic_clinical.csv"
+    ],
+    "unit_of_observation": "fabricated record",
+    "n_total": 30,
+    "n_labelled": 30,
+    "n_positive": 15,
+    "positive_rate": 0.5,
+    "train_samples": 24,
+    "test_samples": 6,
+    "label_leakage": "target is perfectly separated by mutation_type and by severity"
+  },
+  "features": {
+    "n": 20,
+    "names": [
+      "exon",
+      "age_first_treatment",
+      "dose_intensity",
+      "exposure_days",
+      "mutation_code",
+      "mutation_severity",
+      "exon_risk",
+      "cumulative_exposure",
+      "exposure_risk",
+      "age_risk",
+      "severity_code",
+      "mutation_severity_interaction",
+      "treatment_genetics_interaction",
+      "mutation_type_frameshift",
+      "mutation_type_intron22",
+      "mutation_type_missense",
+      "mutation_type_nonsense",
+      "severity_mild",
+      "severity_moderate",
+      "severity_severe"
+    ],
+    "note": "4 of these have no counterpart in CHAMP"
+  },
+  "calibration": {
+    "method": null,
+    "note": "no calibration was performed"
+  },
+  "threshold": {
+    "value": null,
+    "note": "no threshold was ever selected; callers assumed 0.5"
+  },
+  "known_defects": [
+    "rf.pkl == randomforest.pkl == model_ensemble.pkl (byte-identical)",
+    "xgb.pkl == xgboost.pkl (byte-identical)",
+    "lightgbm.pkl is degenerate: one tree, num_leaves=1, no splits",
+    "mutation_severity duplicates mutation_code",
+    "exon_risk is constant 1.0 across all training rows"
+  ],
+  "file_sha256": {
+    "catboost.pkl": "d6847531aa7c541574deef5265d3edb145add1e3487b04d723a44c14792675ac",
+    "columns.pkl": "fad77d16ebc5fcc0933493cf556058daf300fe5a44f25eab9486f57b06f0de5b",
+    "ensemble_hyperparameters.pkl": "e674fb28d2a9ed27cf7dbc5893d48c90d637b65c4024645f7f6e55ac398685ac",
+    "feature_importance.pkl": "979e49d691412cecac112d29bd24523f0bb3edd23ce1b0e11aab1bc5853ac7d7",
+    "feature_names.pkl": "fad77d16ebc5fcc0933493cf556058daf300fe5a44f25eab9486f57b06f0de5b",
+    "lightgbm.pkl": "3ef6390f8fcd50a0a3be93d36a27acd11a439ee10711f4fa14defeec1d95534f",
+    "model_comparison.pkl": "416fe61b7add4d3e004c86b1d78ebbd401998eb48317fc7bd8acb25bf8d2213f",
+    "model_ensemble.pkl": "4f22f1d132b03104316a04ed5c7f8a42e8d71c89424b5534d04e4a0826c3a456",
+    "randomforest.pkl": "4f22f1d132b03104316a04ed5c7f8a42e8d71c89424b5534d04e4a0826c3a456",
+    "rf.pkl": "4f22f1d132b03104316a04ed5c7f8a42e8d71c89424b5534d04e4a0826c3a456",
+    "shap_values.pkl": "bf4c15305a9dfb7a54778294ceb69848959ba25f9a1269630855a4bb9e80deec",
+    "stackingensemble.pkl": "53a186899b6fbe229e4d665e93acd14cf02f2046b07f4fac6b8350669aec26b7",
+    "xgb.pkl": "43d09184c81ba62d0650862512d28e7cb4d80caea25f34586452c6a3740e1c47",
+    "xgboost.pkl": "43d09184c81ba62d0650862512d28e7cb4d80caea25f34586452c6a3740e1c47"
+  },
+  "library_versions": {
+    "scikit_learn": "1.8.0"
+  }
+}
