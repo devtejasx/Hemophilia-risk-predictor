@@ -1,0 +1,44 @@
+# Run from the repository root:
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# Two services. SQLite lives on a named volume, so there is no separate
+# database container to run (the previous compose file had an Alpine
+# placeholder that ran no database engine at all).
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    container_name: hemophilia-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=false
+      - DATABASE_PATH=/data/hemophilia.db
+      - CORS_ORIGINS=http://localhost:3000
+      - ML_MODEL_VERSION=${ML_MODEL_VERSION:-champ-v1}
+      # Required. Provide via docker/.env or the shell; there is no default.
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
+      - BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL:-}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
+    volumes:
+      - db-data:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: hemophilia-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db-data:

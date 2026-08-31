@@ -1,15 +1,18 @@
 services:
   - type: web
-    name: hemophilia-clinician-ai
-    runtime: python-3.11.9
+    name: hemophilia-risk-predictor-api
+    runtime: python
+    pythonVersion: "3.11.9"
     buildCommand: "bash build.sh"
-    startCommand: "streamlit run app.py --server.port=$PORT --server.headless=true --server.enableCORS=false"
+    startCommand: "uvicorn backend_api:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
     envVars:
-      - key: OPENAI_API_KEY
-        scope: build
-      - key: OPENAI_API_KEY
-        scope: runtime
-    routes:
-      - type: http
-        path: /
-
+      # Set in the Render dashboard. Never commit a value here.
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"

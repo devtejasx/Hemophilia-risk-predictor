@@ -1,0 +1,14 @@
+# Development: training, evaluation and tests. Installs runtime deps too.
+-r requirements.txt
+
+# --- Additional model families used only by scripts/train.py ---
+lightgbm==4.7.0
+catboost==1.2.10
+imbalanced-learn==0.14.2
+
+# --- Plots produced by the training/evaluation scripts ---
+matplotlib==3.10.7
+
+# --- Tests ---
+pytest==9.0.0
+httpx==0.28.1
