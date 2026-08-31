@@ -1,146 +1,131 @@
 import React, { useEffect, useState } from 'react'
-import { Navbar } from '@/components/Navbar'
-import { MetricCard } from '@/components/MetricCard'
+import { Link } from 'react-router-dom'
+import { Users, Activity, Gauge } from 'lucide-react'
 import {
-  RiskDistributionChart,
-  TrendChart,
-  SeverityDistributionChart,
-} from '@/components/Charts'
-import { PatientCard } from '@/components/PatientCard'
-import { analyticsAPI, patientAPI } from '@/services/api-client'
+  analyticsAPI,
+  patientAPI,
+  type Analytics,
+  type Patient,
+} from '@/services/api-client'
+import { errorMessage } from '@/services/api'
+import MetricCard from '@/components/MetricCard'
+import RiskBadge from '@/components/RiskBadge'
+import { Disclaimer } from '@/components/Disclaimer'
 import { useAppStore } from '@/store/appStore'
-import { BarChart3, Users, AlertTriangle, TrendingUp } from 'lucide-react'
 
-export const Dashboard: React.FC = () => {
-  const [analytics, setAnalytics] = useState<any>(null)
-  const [recentPatients, setRecentPatients] = useState<any[]>([])
+const Dashboard: React.FC = () => {
+  const user = useAppStore((s) => s.user)
+  const [analytics, setAnalytics] = useState<Analytics | null>(null)
+  const [recent, setRecent] = useState<Patient[]>([])
   const [loading, setLoading] = useState(true)
-  const { setCurrentPatient } = useAppStore()
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        const [analyticsData, patientsData] = await Promise.all([
-          analyticsAPI.getDashboard(),
-          patientAPI.getAll(5, 0),
-        ])
-        setAnalytics(analyticsData)
-        setRecentPatients(patientsData.data || [])
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
+    Promise.all([analyticsAPI.get(), patientAPI.list(5, 0)])
+      .then(([a, p]) => {
+        setAnalytics(a)
+        setRecent(p)
+      })
+      .catch((err) => setError(errorMessage(err, 'Could not load the dashboard.')))
+      .finally(() => setLoading(false))
   }, [])
 
-  const riskChartData = [
-    { name: 'Low Risk', value: analytics?.low_risk_count || 0 },
-    { name: 'Medium Risk', value: analytics?.medium_risk_count || 0 },
-    { name: 'High Risk', value: analytics?.high_risk_count || 0 },
-  ]
-
-  const severityData = Object.entries(analytics?.severity_distribution || {}).map(
-    ([name, count]) => ({
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      count,
-    })
-  )
-
-  const trendData = Array.from({ length: 7 }, (_, i) => ({
-    day: `Day ${i + 1}`,
-    risk: Math.random() * 100,
-  }))
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950">
-      <Navbar title="Dashboard" />
-
-      <div className="p-6">
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <MetricCard
-            title="Total Patients"
-            value={analytics?.total_patients || 0}
-            icon={<Users className="w-6 h-6" />}
-            loading={loading}
-            change={5}
-          />
-          <MetricCard
-            title="High Risk Patients"
-            value={analytics?.high_risk_count || 0}
-            icon={<AlertTriangle className="w-6 h-6" />}
-            color="red"
-            loading={loading}
-            change={-2}
-          />
-          <MetricCard
-            title="Average Risk Score"
-            value={analytics?.average_risk?.toFixed(2) || '0'}
-            icon={<BarChart3 className="w-6 h-6" />}
-            color="blue"
-            loading={loading}
-          />
-          <MetricCard
-            title="Severe Cases"
-            value={analytics?.severe_cases || 0}
-            icon={<TrendingUp className="w-6 h-6" />}
-            color="green"
-            loading={loading}
-            change={3}
-          />
-        </div>
-
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div className="lg:col-span-1">
-            <RiskDistributionChart data={riskChartData} loading={loading} />
-          </div>
-          <div className="lg:col-span-2">
-            <TrendChart
-              data={trendData}
-              title="Risk Trends (Last 7 Days)"
-              loading={loading}
-            />
-          </div>
-        </div>
-
-        <SeverityDistributionChart data={severityData} loading={loading} />
-
-        {/* Recent Patients */}
-        <div className="mt-8">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">
-            Recent Patients
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {loading ? (
-              Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-64 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse"
-                />
-              ))
-            ) : recentPatients.length === 0 ? (
-              <div className="col-span-full text-center py-12">
-                <p className="text-slate-500 dark:text-slate-400">
-                  No patients found. Start by adding your first patient.
-                </p>
-              </div>
-            ) : (
-              recentPatients.map((patient) => (
-                <PatientCard
-                  key={patient.id}
-                  {...patient}
-                  onClick={() => setCurrentPatient(patient)}
-                />
-              ))
-            )}
-          </div>
-        </div>
+    <div className="p-8 max-w-5xl space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+          {user ? `Welcome, ${user.full_name}` : 'Dashboard'}
+        </h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Explainable Hemophilia A inhibitor-risk estimates from CHAMP genomic data.
+        </p>
       </div>
+
+      <Disclaimer variant="banner" />
+
+      {error && (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {error}
+        </p>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <MetricCard
+          title="Patients"
+          value={analytics?.total_patients ?? 0}
+          loading={loading}
+          icon={<Users className="w-5 h-5" />}
+          color="purple"
+        />
+        <MetricCard
+          title="Estimates run"
+          value={analytics?.total_predictions ?? 0}
+          loading={loading}
+          icon={<Activity className="w-5 h-5" />}
+          color="blue"
+        />
+        <MetricCard
+          title="Mean probability"
+          value={
+            analytics?.mean_probability != null
+              ? `${(analytics.mean_probability * 100).toFixed(1)}%`
+              : '—'
+          }
+          loading={loading}
+          icon={<Gauge className="w-5 h-5" />}
+          color="green"
+        />
+      </div>
+
+      {analytics && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {analytics.note} Model version {analytics.model_version}.
+        </p>
+      )}
+
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-semibold text-slate-900 dark:text-white">Recent patients</h2>
+          <Link
+            to="/patients"
+            className="text-sm text-purple-600 dark:text-purple-400 hover:underline"
+          >
+            View all
+          </Link>
+        </div>
+
+        {!loading && recent.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            No patients yet.{' '}
+            <Link to="/patients/new" className="text-purple-600 dark:text-purple-400 hover:underline">
+              Add one
+            </Link>
+            .
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {recent.map((p) => (
+              <li key={p.id}>
+                <Link
+                  to={`/patients/${p.id}`}
+                  className="flex items-center justify-between gap-4 flex-wrap rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 hover:border-purple-400 dark:hover:border-purple-600"
+                >
+                  <span className="text-sm text-slate-900 dark:text-white">
+                    {p.display_name}
+                    <span className="text-slate-400"> · {p.identifier}</span>
+                  </span>
+                  {p.latest_probability != null && p.latest_risk_category && (
+                    <RiskBadge
+                      probability={p.latest_probability}
+                      category={p.latest_risk_category}
+                    />
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }

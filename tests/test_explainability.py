@@ -55,8 +55,17 @@ def test_contributions_report_the_value_actually_supplied(
 @pytest.mark.parametrize("method", ["shap", "lime"])
 def test_direction_matches_the_sign_of_the_contribution(explanation, method):
     for item in explanation[method]["contributions"]:
-        expected = "increases" if item["contribution"] > 0 else "decreases"
+        value = item["contribution"]
+        expected = "increases" if value > 0 else "decreases" if value < 0 else "no effect"
         assert item["direction"] == expected
+
+
+@pytest.mark.parametrize("method", ["shap", "lime"])
+def test_zero_contribution_is_not_labelled_a_decrease(explanation, method):
+    """A displayed +0.0000 alongside "decreases" reads as a contradiction."""
+    for item in explanation[method]["contributions"]:
+        if item["contribution"] == 0:
+            assert item["direction"] == "no effect"
 
 
 @pytest.mark.parametrize("method", ["shap", "lime"])

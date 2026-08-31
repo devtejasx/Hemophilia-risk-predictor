@@ -1,204 +1,318 @@
-# Hemophilia Risk Predictor
+# Hemophilia Inhibitor-Risk Predictor
 
-![Streamlit](https://img.shields.io/badge/Streamlit-1.55-FF4B4B?logo=streamlit&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
-![Status](https://img.shields.io/badge/status-prototype-yellow)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![Tests](https://img.shields.io/badge/tests-98%20passing-2C6642)
+![Status](https://img.shields.io/badge/status-research%20prototype-8A5D0B)
 
-A Streamlit-based demo UI for a hypothetical hemophilia clinical risk-assessment tool. This README documents **what is actually deployed and runnable today**, verified directly against the code and deployment config — not the more ambitious system described in this repo's many other docs (see [Repository State](#repository-state--important) below, which you should read before relying on anything else in this repo).
+An explainable Hemophilia A inhibitor-risk prediction **research prototype**
+based on CHAMP genomic data.
 
-## Table of Contents
+> **Medical disclaimer.** This is research decision-support software, not a
+> diagnostic device. It is **not clinically validated**, has no external
+> validation cohort, and must not be used for standalone diagnosis or treatment
+> decisions. It never recommends a course of treatment. Estimates are attributed
+> to an F8 **variant**, not to an individual patient — see
+> [Limitations](#limitations).
 
-- [Repository State (important)](#repository-state--important)
-- [What Actually Runs](#what-actually-runs)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Prerequisites](#prerequisites)
+## Contents
+
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Dataset](#dataset)
+- [ML pipeline and results](#ml-pipeline-and-results)
+- [Explainability](#explainability)
 - [Installation](#installation)
-- [Configuration](#configuration-environment-variables)
-- [Running Locally](#running-locally)
-- [Running with Docker](#running-with-docker-experimental-unused-path)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Security Considerations](#security-considerations)
-- [Troubleshooting](#troubleshooting)
-- [Known Issues / Inconsistencies](#known-issues--inconsistencies)
-- [Contributing](#contributing)
-- [License](#license)
-- [Future Improvements](#future-improvements)
+- [Environment variables](#environment-variables)
+- [Running locally](#running-locally)
+- [Running the tests](#running-the-tests)
+- [Docker](#docker)
+- [API](#api)
+- [Project structure](#project-structure)
+- [Limitations](#limitations)
+- [Repository history](#repository-history)
 
-## Repository State (important)
+## What it does
 
-This repository contains **at least four different, mutually inconsistent stories about what the application is**, plus roughly 100 one-shot markdown documents (now parked under `archive/session-docs/`) describing features that are not present in the code that's actually deployed. Before using this repo, understand:
+A clinician signs in, records a patient, enters that patient's F8 variant as
+described in CHAMP, and receives a calibrated probability that such a variant
+has a reported history of inhibitor development — together with SHAP and LIME
+explanations of which genomic features drove the estimate. Predictions and
+explanations are stored and viewable as history.
 
-1. **What's actually deployed** (per `Procfile` and `render.yaml`): a single-file Streamlit app, `app.py`, run standalone with no backend service.
-2. **What the previous root README described**: a "Hemophilia AI Platform" with a real GPT-4 chatbot, a SQL database with 6 tables, ML risk prediction via `rf.pkl`/`xgb.pkl`, and PDF report generation. **This does not match `app.py`.**
-3. **What `docker-compose.yml` describes**: a split architecture — `app_frontend.py` (Streamlit) calling `backend_api.py` (FastAPI) over HTTP, plus a placeholder database container. This is a real, self-consistent architecture, but it is **not** what `Procfile`/`render.yaml` deploy.
-4. **What `clean_project/` describes**: a from-scratch modular rewrite (its own `README.md` frames it as "v2.0", consolidating "8 duplicate app files, 4 duplicate API files, 8 auth modules, 5 chatbot implementations" into one app). It is fully self-contained but **not referenced by anything outside its own folder** — nothing wires it up as the real entrypoint.
-
-This README documents story #1 (the one that's actually live), and calls out the others so you don't spend time debugging code paths that were never wired into deployment.
-
-## What Actually Runs
-
-`app.py` at the repo root, verified by reading it directly:
-
-- A **single-page Streamlit app** (auto-logs in a hardcoded user, "Dr. Sarah Chen" — there is no real authentication).
-- Patient data is **hardcoded in-memory** (`PAT001`, `PAT002`, `PAT003`) — there is no database read/write despite `hemophilia.db` and `hemophilia_clinic.db` files sitting in the repo.
-- "Risk prediction" is a hand-written weighted formula over `numpy.random` values (`generate_sample_prediction()`) — **no ML model is loaded**. `app.py` imports `pickle` but never calls `pickle.load`, and none of the 14 committed `.pkl` files (`catboost.pkl`, `rf.pkl`, `xgb.pkl`, `lightgbm.pkl`, ensemble models, etc.) are read anywhere in this file.
-- SHAP explainability charts are **hardcoded static numbers**, not real SHAP output, despite `shap` being a dependency.
-- The chatbot is **simple keyword matching** (e.g. `if "help" in message`) — no OpenAI/GPT-4 call, despite prior docs describing a GPT-4 integration.
-
-In short: this is a UI mockup with realistic-looking but fabricated data, useful for demoing the intended workflow, not a working clinical risk model.
-
-## Tech Stack
-
-From the root `requirements.txt` (a full `pip freeze` dump, ~140 packages — see [Known Issues](#known-issues--inconsistencies)):
-
-- **Streamlit 1.55** — the only UI actually deployed
-- **Plotly** — charts within `app.py`
-- **pandas / numpy** — data handling
-- Present as dependencies but **not exercised by the deployed app**: `fastapi`, `uvicorn`, `scikit-learn`, `xgboost`, `shap`, `torch`, `transformers`, a full Supabase client stack (`supabase`, `postgrest`, `realtime`, `storage3`), `SQLAlchemy`, `psycopg2-binary`, `python-jose`, `reportlab`, `pygame`, `pytest`
-
-## Project Structure
+## Architecture
 
 ```
-Hemophilia-risk-predictor/
-├── app.py                    # ACTUAL deployed entrypoint (Procfile/render.yaml) — mock Streamlit demo
-├── requirements.txt           # full pip-freeze dump used by the real deployment
-├── Procfile / render.yaml     # deploy app.py as a standalone Streamlit service
-├── build.sh                    # pip install -r requirements.txt
-├── runtime.txt                 # python-3.11.9 (conflicts with .python-version, see Known Issues)
-│
-├── app_frontend.py            # Streamlit UI for the docker-compose path
-├── archive/                    # one-shot session docs + superseded app/api variants (see archive/README.md)
-│
-├── backend/                   # a full FastAPI package (auth, routers, services) — not deployed
-├── fastapi_backend/           # a SECOND, independent FastAPI package with its own docs — not deployed
-├── backend_api.py             # a THIRD standalone FastAPI app — only used via Dockerfile.backend
-│
-├── frontend/                  # separate Vite + React + TypeScript SPA, expects a backend on :8000/api — not deployed
-├── clean_project/              # self-contained "v2.0" modular rewrite — not wired to anything outside itself
-│
-├── pages/, streamlit_pages/    # two separate sets of Streamlit multipage files, neither imported by app.py
-├── components/, services/, styles/, utils/   # root-level packages, duplicated again inside clean_project/
-│
-├── *.pkl                       # 14 committed model artifacts, unused by the deployed app.py
-├── hemophilia.db, hemophilia_clinic.db       # committed SQLite DBs, unused by the deployed app.py
-├── champ.csv, clinical.csv, genomic.csv, X_test.csv, y_test.csv, ...  # committed datasets
-├── catboost_info/              # committed CatBoost training logs
-│
-├── docker-compose.yml, Dockerfile.backend, Dockerfile.frontend  # describes a DIFFERENT architecture
-│                                                                    (app_frontend.py + backend_api.py), not used by Procfile/render.yaml
-│
-└── ~100 top-level *.md files   # overlapping guides/summaries for features not present in the deployed app
+                    ┌─────────────────────┐
+                    │   React Frontend    │
+                    │ TypeScript / Vite   │
+                    └──────────┬──────────┘
+                               │ REST /api
+                               ▼
+                    ┌─────────────────────┐
+                    │   FastAPI Backend   │
+                    │ auth · patients     │
+                    │ predictions         │
+                    │ explanations        │
+                    │ analytics · health  │
+                    └──────────┬──────────┘
+                 ┌─────────────┴─────────────┐
+                 ▼                           ▼
+          ┌─────────────┐          ┌──────────────────┐
+          │  SQLite DB  │          │   ml/ package    │
+          │  users      │          │  preprocessing   │
+          │  patients   │          │  inference       │
+          │  genomic_   │          │  explainability  │
+          │   profiles  │          └────────┬─────────┘
+          │  predictions│                   ▼
+          │  explanations│         ┌──────────────────┐
+          │  audit_logs │          │ champ-v1 artifact│
+          └─────────────┘          │ model + preproc  │
+                                   │ + metadata       │
+                                   └──────────────────┘
 ```
 
-## Prerequisites
+Three deployable pieces: frontend, backend, database. ML inference runs inside
+the backend process — a separate model service would add operational cost with
+no benefit at this size. The model is loaded **once at startup**, not per
+request.
 
-- Python 3.11 (matches `runtime.txt`, used by the real Render deployment)
+## Dataset
+
+`ml/data/champ.csv` — the CDC Hemophilia A Mutation Project variant registry.
+**CHAMP is the only dataset used.** No WBDR, ATHN, hospital data, or synthetic
+augmentation. The file is never modified; all normalisation happens in
+`ml/preprocessing/champ.py`.
+
+| | rows |
+|---|---|
+| In file | 4,050 |
+| Labelled (`History of Inhibitor` = Yes/No) | **2,296** |
+| — positive | 461 (20.08%) |
+| Excluded: `Not reported` | 1,742 |
+| Excluded: blank label | 12 |
+
+Labelled + excluded = 4,050, asserted by the test suite so no record can be
+dropped without appearing in the exclusion report.
+
+Nine source features: `Variant Type`, `Mechanism`, `Domain`, `Subtype`,
+`In Poly A`, `Reported Clinical Severity`, plus `exon_number`, `codon_number`
+and `is_intron` derived from the `Exon` and `Codon` columns.
+
+## ML pipeline and results
+
+```
+CHAMP → validate → normalise → label → SPLIT FIRST
+      → fit preprocessor on TRAIN ONLY
+      → model selection (5-fold CV, SMOTE inside folds)
+      → isotonic calibration
+      → threshold chosen on a validation split
+      → evaluate ONCE on held-out test
+      → predict → SHAP / LIME
+```
+
+Held-out test set (460 variants, 92 positive), produced by
+`scripts/train_champ.py`:
+
+| Metric | Value |
+|---|---|
+| ROC-AUC | **0.723** |
+| PR-AUC | **0.501** (base rate 0.201) |
+| Brier score | 0.134 |
+| Precision @ threshold 0.175 | 0.311 |
+| Recall @ threshold 0.175 | 0.772 |
+
+**Read this honestly.** PR-AUC 0.50 against a 0.20 base rate is a 2.5× lift —
+real signal. But at the F1-optimal threshold the model flags 228 variants to
+catch 71 of 92 true positives: roughly two false alarms per true one. It is a
+screening aid that errs toward sensitivity, not a decision rule. Accuracy is
+deliberately not a headline metric — predicting "no inhibitor" for everything
+scores 0.80 here and is useless.
+
+Full detail, including model comparison and every caveat: **[docs/ML.md](docs/ML.md)**.
+
+## Explainability
+
+One service, `ml/explainability/service.py`, provides both:
+
+- **SHAP** — exact TreeSHAP over the ensemble beneath the calibrator (~0.4s).
+  Global feature importance and per-prediction local contributions.
+- **LIME** — local linear approximation for individual predictions.
+
+Both aggregate the 47 encoded columns back onto the 9 source CHAMP columns, so
+an explanation never names `cat__Variant Type_Missense` and never names a
+feature the caller did not supply. If an explainer fails, the response says so
+rather than returning a fabricated attribution.
 
 ## Installation
+
+Requires Python 3.11 and Node 20+.
 
 ```bash
 git clone https://github.com/devtejasx/Hemophilia-risk-predictor.git
 cd Hemophilia-risk-predictor
+python -m venv .venv && source .venv/Scripts/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+cd frontend && npm install && cd ..
 ```
 
-## Configuration (Environment Variables)
+For training and tests, use `pip install -r requirements-dev.txt` instead.
 
-`render.yaml` declares one env var for the deployed service:
+`scikit-learn` is pinned to 1.8.0 exactly: the serialised artifacts were fitted
+with it and a minor-version drift changes unpickling behaviour.
 
-| Variable | Purpose |
-|---|---|
-| `OPENAI_API_KEY` | Declared in `render.yaml`/`.env.example`, but **not actually read anywhere in `app.py`** — the deployed chatbot uses keyword matching, not the OpenAI API. |
+## Environment variables
 
-`.env.example` at the root additionally documents a large set of production-style settings (`DATABASE_URL`, SMTP, Sentry/Datadog keys, rate limiting, etc.) that correspond to the `backend_api.py`/`fastapi_backend/` code paths, not to the deployed `app.py`. If you're only running `app.py`, none of these are required.
+Copy `.env.example` to `.env`. Nothing is committed with a real value.
 
-## Running Locally
-
-```bash
-streamlit run app.py
-```
-
-Opens at `http://localhost:8501`. No `.env`, database, or model files are required for this to work, since `app.py` doesn't read any of them.
-
-## Running with Docker (experimental, unused path)
-
-`docker-compose.yml` defines a three-service topology that is **not the same application as `app.py`**:
-
-```bash
-docker-compose up --build
-```
-
-| Service | Runs | Port |
+| Variable | Default | Notes |
 |---|---|---|
-| `backend` | `backend_api.py` via `Dockerfile.backend` (uvicorn) | 8000 |
-| `frontend` | `app_frontend.py` via `Dockerfile.frontend` (Streamlit), configured with `API_BASE_URL=http://backend:8000` | 8501 |
-| `db` | a bare Alpine placeholder container — does not actually run a database engine | — |
+| `JWT_SECRET_KEY` | — | **Required in production.** In development a random per-process key is generated, so tokens do not survive a restart. Generate: `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `ENVIRONMENT` | `development` | `production` makes a missing/short secret fatal |
+| `CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | Exact origins, comma separated. Never `*`. |
+| `DATABASE_PATH` | `hemophilia.db` | |
+| `ML_MODEL_VERSION` | `champ-v1` | |
+| `ML_ARTIFACTS_DIR` | `ml/artifacts` | |
+| `BOOTSTRAP_ADMIN_EMAIL` / `_PASSWORD` | empty | If unset, **no account is seeded at all** |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | |
 
-This is a coherent design for a real frontend/backend split, but it's disconnected from what `Procfile`/`render.yaml` actually deploy, and the `db` service is a stub.
+Frontend (`frontend/.env`): `VITE_API_URL` — only `VITE_*` reaches the browser
+bundle, so never put a secret there.
 
-## Testing
+## Running locally
 
-No real automated test suite exists. Three loose scripts sit at the repo root:
-- `auth_test.py`, `test_model_loading.py`, `test_pickle_load.py` — manual smoke-test scripts (print statements, no `assert`s, not organized as a pytest suite)
+Two terminals:
 
-There is no `tests/` directory, no `pytest.ini`/`conftest.py`, and no CI to run anything. `clean_project/README.md` references `pytest --cov` and a `tests/` folder, but that test infrastructure does not exist in the repo.
+```bash
+uvicorn backend.main:app --reload --port 8000
+```
 
-## Deployment
+```bash
+cd frontend && npm run dev
+```
 
-The only deployment path actually configured:
+Open http://localhost:3000, create an account, add a patient, then enter a
+variant. `GET /health` reports database and model status.
 
-1. **Render** (`render.yaml`): builds via `build.sh` (`pip install -r requirements.txt`), starts with `streamlit run app.py --server.port=$PORT --server.headless=true --server.enableCORS=false`.
-2. **Procfile** (Heroku-style): identical `streamlit run app.py` command.
+To retrain (optional — `champ-v1` is committed):
 
-Both deploy the mock demo described in [What Actually Runs](#what-actually-runs) — no backend, no database, no ML inference.
+```bash
+python scripts/train_champ.py
+```
 
-## Security Considerations
+## Running the tests
 
-- The deployed `app.py` **auto-logs in a hardcoded user** with no credential check — there is no real authentication on the live path.
-- `.gitignore` excludes `.env/` (a directory) but **not `.env`** (a file) — if a real `.env` were ever created here, it would not be excluded from git by the current `.gitignore`.
-- `.gitignore` also lists `.streamlit/` as ignored, yet `.streamlit/config.toml` is committed anyway — the ignore rule was added after the file was already tracked.
-- Real secrets-handling code exists (`auth_security.py`, `security.py`, `backend/security.py`, JWT/bcrypt dependencies) but belongs to the unused `backend`/`fastapi_backend`/`backend_api.py` paths, not the deployed app — don't assume the live app has this protection.
-- Sample/synthetic patient data is committed (`champ.csv`, `clinical.csv`, `genomic.csv`, `patients_backup_20260327_124514.csv`) — confirm this is genuinely synthetic before treating it as safe to keep in a public repo, given the healthcare subject matter.
+```bash
+pytest
+```
 
-## Troubleshooting
+98 tests: data integrity, preprocessing, feature ordering, artifact
+consistency, inference, thresholding, input validation, SHAP/LIME, API
+contract, authentication, authorisation, failure handling, and one end-to-end
+test that walks input → API → preprocessing → model → prediction → explanation
+→ database → response.
 
-- **"Where's the real ML prediction?"** — there isn't one wired up in the deployed app; see [What Actually Runs](#what-actually-runs).
-- **`streamlit run app.py` shows different behavior than the old README described** — the old README documented a different, unimplemented version of the app; trust this README and the code instead.
-- **Python version mismatches** — `.python-version` says `3.10.13` while `runtime.txt` (used by Render) says `python-3.11.9`. Use 3.11 to match what's actually deployed.
-- **`requirements.txt` fails to parse in some editors** — the file is UTF-16LE encoded (an artifact of `pip freeze > requirements.txt` on Windows PowerShell); re-save as UTF-8 if you need to hand-edit it.
+Frontend type-check and build:
 
-## Known Issues / Inconsistencies
+```bash
+cd frontend && npm run build
+```
 
-Flagged here rather than silently fixed, since resolving them requires deciding which of the competing implementations is the "real" project:
+## Docker
 
-1. **The deployed app doesn't match any of the project's own documentation.** The (previous) root README, `clean_project/README.md`, and the various `*_SUMMARY.md`/`*_GUIDE.md` files describe GPT-4 chatbots, real ML models, and database persistence that don't exist in the code path Render/Procfile actually run.
-2. **At least 4 competing "canonical app" implementations**, none pointing to each other: root `app.py` (deployed), `clean_project/app.py` (self-described rewrite, unreferenced), `docker-compose.yml`'s `app_frontend.py` + `backend_api.py` pair (a different real architecture, unreferenced by the Streamlit-only deploy), and a React `frontend/` SPA expecting a backend on port 8000 (also unreferenced by the deploy).
-3. **Three separate, non-shared FastAPI backends** exist: `backend/`, `fastapi_backend/`, and root `backend_api.py`. They overlap in responsibility (patients, predictions, chat, auth) but share no code.
-4. **Six or more alternate/duplicate app files** (`app_backup.py`, `app_optimized.py`, `app_refactored.py`, `app_unified.py`, `app_updated.py`, plus 4 `api*.py` variants) sit at the root with no indication of which — if any — should be kept.
-5. **14 `.pkl` model files, 2 SQLite databases, and 8 CSV datasets are committed directly to git**, none of them read by the deployed `app.py`.
-6. **~100 top-level markdown files** with heavy overlap (e.g. 5 `AUTHENTICATION_*.md` files, 8 `SHAP_*.md` files, 4 `FASTAPI_*.md` files) make it very hard to find authoritative information.
-7. **Inconsistent Python version pinning** — `.python-version` (3.10.13) vs `runtime.txt` (3.11.9).
-8. **`.gitignore` gaps** — doesn't exclude `.env` (only `.env/`), and excludes `.streamlit/` after `.streamlit/config.toml` was already committed.
-9. **7 different `requirements*.txt` files** at various paths (`requirements.txt`, `requirements_auth.txt`, `requirements_optimized.txt`, `requirements_production.txt`, `requirements_streamlit.txt`, `backend/requirements.txt`, `fastapi_backend/requirements.txt`, `clean_project/requirements.txt`) with no documentation of which applies where.
-10. **No LICENSE file, no `.github/` CI workflows, no real automated test suite.**
+```bash
+docker compose -f docker/docker-compose.yml up --build
+```
 
-## Contributing
+Frontend on `:3000` (nginx, proxying `/api` to the backend), backend on `:8000`,
+SQLite on a named volume. `JWT_SECRET_KEY` must be supplied — there is no
+default.
 
-1. Fork the repository
-2. Before adding new features, read [Repository State](#repository-state--important) — pick one of the existing implementations to build on rather than adding a fifth
-3. Open a pull request
+> The Docker path is configured but has **not** been executed in this
+> environment; the local and test paths above have been.
+
+## API
+
+Interactive docs at `/docs`. Full reference: **[docs/API.md](docs/API.md)**.
+
+```
+POST   /api/auth/register · /api/auth/login      GET /api/auth/me
+POST   /api/patients                             GET /api/patients · /api/patients/{id}
+GET    /api/predictions/schema
+POST   /api/patients/{id}/predictions
+GET    /api/predictions/{id}
+GET    /api/predictions/{id}/explanation
+GET    /api/patients/{id}/history
+GET    /api/analytics                            GET /health
+```
+
+## Project structure
+
+```
+frontend/            React + TypeScript + Vite SPA (the production UI)
+backend/             one FastAPI application
+  core/              config, security
+  routers/           auth, patients, predictions, analytics
+  services/          adapter over the ml package
+  db.py              the single SQLite layer
+ml/
+  data/champ.csv     the authoritative dataset
+  preprocessing/     validation, normalisation, fitted ColumnTransformer
+  models/            model registry and imbalance handling
+  explainability/    SHAP + LIME
+  artifacts/
+    champ-v1/        model, preprocessor, metadata.json, metrics.json
+    legacy-synthetic-v0/   preserved for provenance; see its PROVENANCE.md
+  inference.py       the single predict() entrypoint
+tests/               98 tests, including one end-to-end
+scripts/train_champ.py
+docker/              Dockerfiles, compose, nginx
+docs/                AUDIT.md · CANONICAL.md · ML.md · API.md
+archive/             superseded implementations, kept for reference
+```
+
+## Limitations
+
+1. **Variant-level, not patient-level.** CHAMP rows are F8 variants and
+   `History of Inhibitor` is a registry aggregation over reports for that
+   variant. The output is variant-attributable risk, not an individual's
+   probability of developing an inhibitor.
+2. **Reporting bias.** 1,754 rows (43%) are excluded for having no reported
+   inhibitor history, almost certainly non-randomly — variants studied in
+   inhibitor-focused work are likelier to have the field filled. The 20.08%
+   positive rate describes this registry's reporting, not population incidence.
+3. **No external validation.** One registry, one random split. **No clinical
+   validation is claimed.**
+4. **Genomic only.** There is no authorised clinical dataset in this
+   repository. No genomic + clinical fusion is performed or claimed.
+5. **Modest discrimination.** ROC-AUC 0.72 with low precision at the operating
+   threshold. Useful for screening, not for deciding.
+6. **Model choice is weakly evidenced.** The four candidate models sat within
+   one standard deviation of each other in cross-validation.
+
+## Repository history
+
+This repository previously contained four competing application stacks, three
+non-importing FastAPI backends, four Streamlit UIs, five chatbot
+implementations, and around 100 aspirational markdown documents. A full audit
+is in **[docs/AUDIT.md](docs/AUDIT.md)**; the resulting canonical choices are in
+**[docs/CANONICAL.md](docs/CANONICAL.md)**.
+
+Two findings worth knowing:
+
+- **The previously committed models were never trained on CHAMP.** They were fitted
+  on 30 fabricated rows whose label was a deterministic function of two input
+  columns. They are preserved, unmodified and clearly labelled, in
+  `ml/artifacts/legacy-synthetic-v0/` and are not servable.
+- **`hemophilia_clinic.db` was committed to git** containing four accounts that
+  shared the unsalted MD5 of `password123`. The file is now untracked, but
+  untracking does not remove it from git history: those accounts should be
+  treated as compromised.
+
+Superseded code was moved to `archive/` with `git mv`, so history follows each
+file. Nothing was deleted.
 
 ## License
 
-No `LICENSE` file exists in this repository.
-
-## Future Improvements
-
-- Pick one canonical implementation (the deployed `app.py`, the `docker-compose.yml` split architecture, or `clean_project/`) and delete or clearly archive the others
-- Wire the deployed app to an actual trained model (the `.pkl` files already exist) instead of `numpy.random`-based mock predictions
-- Consolidate the ~100 markdown files into a single, current set of docs
-- Remove committed model/database/dataset artifacts from git history if they contain anything beyond synthetic sample data, and add them to `.gitignore` going forward
-- Fix the `.env` gitignore gap and the Python version mismatch
-- Add a real automated test suite and CI
+MIT — see [LICENSE](LICENSE).

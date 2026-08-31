@@ -1,6 +1,6 @@
 import React from 'react'
 import clsx from 'clsx'
-import { ArrowUpRight, ArrowDownRight, TrendingUp } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface MetricCardProps {
   title: string

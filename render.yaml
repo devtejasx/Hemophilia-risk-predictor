@@ -4,7 +4,7 @@ services:
     runtime: python
     pythonVersion: "3.11.9"
     buildCommand: "bash build.sh"
-    startCommand: "uvicorn backend_api:app --host 0.0.0.0 --port $PORT"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
       # Set in the Render dashboard. Never commit a value here.

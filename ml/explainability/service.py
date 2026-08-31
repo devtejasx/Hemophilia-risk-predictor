@@ -42,7 +42,14 @@ class FeatureContribution:
     direction: str = field(init=False)
 
     def __post_init__(self) -> None:
-        self.direction = "increases" if self.contribution > 0 else "decreases"
+        # A contribution of exactly zero is neither. Reporting it as
+        # "decreases" alongside a displayed +0.0000 reads as a contradiction.
+        if self.contribution > 0:
+            self.direction = "increases"
+        elif self.contribution < 0:
+            self.direction = "decreases"
+        else:
+            self.direction = "no effect"
 
     def as_dict(self) -> dict[str, Any]:
         return {

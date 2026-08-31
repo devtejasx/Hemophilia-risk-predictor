@@ -1,16 +1,9 @@
-import type { defineConfig } from 'vite'
+/// <reference types="vite/client" />
 
-export interface ViteEnv {
-  VITE_API_URL: string
-  VITE_API_KEY?: string
-  VITE_APP_NAME?: string
-  VITE_DEBUG?: boolean
+interface ImportMetaEnv {
+  readonly VITE_API_URL?: string
 }
 
-declare global {
-  namespace ImportMeta {
-    interface ImportMetaEnv extends ViteEnv {}
-  }
+interface ImportMeta {
+  readonly env: ImportMetaEnv
 }
-
-export {}

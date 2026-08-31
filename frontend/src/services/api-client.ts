@@ -1,157 +1,188 @@
 import apiClient from './api'
 
+/* ------------------------------------------------------------------ *
+ * Types mirror backend/schemas.py. Keep the two in step.
+ * ------------------------------------------------------------------ */
+
+export interface User {
+  id: number
+  email: string
+  full_name: string
+  role: string
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+  expires_in_minutes: number
+}
+
 export interface Patient {
-  id: string
-  name: string
-  age: number
-  severity: string
-  mutation_type: string
-  blood_type: string
-  email?: string
-  phone?: string
+  id: number
+  identifier: string
+  display_name: string
+  notes?: string | null
   created_at: string
-  updated_at: string
+  updated_at?: string | null
+  prediction_count: number
+  latest_probability?: number | null
+  latest_risk_category?: string | null
 }
 
-export interface PredictionResult {
-  risk_score: number
-  risk_level: string
-  main_factor: string
-  confidence: number
-  importance: Record<string, number>
-  shap_explanation?: Record<string, unknown>
+/** A CHAMP-compatible F8 variant. Keys are the CHAMP column names. */
+export interface GenomicInput {
+  'Variant Type': string
+  Mechanism: string
+  Domain: string
+  Subtype: string
+  'In Poly A': string
+  'Reported Clinical Severity': string
+  exon_number?: number | null
+  codon_number?: number | null
+  is_intron?: boolean
 }
 
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: string
+export interface Prediction {
+  id: number
+  patient_id: number
+  probability: number
+  risk_category: string
+  threshold: number
+  model_version: string
+  preprocessing_version: string
+  created_at: string
+  interpretation: string
+  disclaimer: string
 }
 
-export interface AnalyticsData {
+export interface Contribution {
+  feature: string
+  value: unknown
+  contribution: number
+  direction: 'increases' | 'decreases'
+}
+
+export interface MethodExplanation {
+  available: boolean
+  reason?: string | null
+  basis?: string | null
+  base_value?: number | null
+  local_prediction?: number | null
+  contributions: Contribution[]
+}
+
+export interface Explanation {
+  prediction_id: number
+  model_version: string
+  unit_of_explanation: string
+  shap?: MethodExplanation | null
+  lime?: MethodExplanation | null
+  disclaimer: string
+}
+
+export interface Analytics {
   total_patients: number
-  high_risk_count: number
-  average_risk: number
-  severe_cases: number
-  severity_distribution: Record<string, number>
+  total_predictions: number
+  mean_probability?: number | null
+  risk_distribution: Record<string, number>
+  variant_type_distribution: Record<string, number>
+  model_version: string
+  note: string
 }
 
-// Patient APIs
-export const patientAPI = {
-  getAll: async (limit = 100, skip = 0) => {
-    const response = await apiClient.get('/patients', {
-      params: { limit, skip },
+/** The vocabulary the model was actually fitted on. */
+export interface PredictionSchema {
+  model_version: string
+  categorical: Record<string, string[]>
+  numeric: Record<string, { description: string; required: boolean }>
+  boolean: Record<string, { description: string; required: boolean }>
+  required: string[]
+}
+
+export interface GlobalImportance {
+  model_version: string
+  available: boolean
+  reason?: string
+  method?: string
+  basis?: string
+  n_background?: number
+  features?: Array<{ feature: string; importance: number }>
+}
+
+/* ------------------------------------------------------------------ */
+
+export const authAPI = {
+  register: async (email: string, full_name: string, password: string) => {
+    const { data } = await apiClient.post<TokenResponse>('/auth/register', {
+      email,
+      full_name,
+      password,
     })
-    return response.data
+    return data
   },
-
-  getById: async (id: string) => {
-    const response = await apiClient.get(`/patients/${id}`)
-    return response.data
+  login: async (email: string, password: string) => {
+    const { data } = await apiClient.post<TokenResponse>('/auth/login', { email, password })
+    return data
   },
-
-  create: async (data: Omit<Patient, 'id' | 'created_at' | 'updated_at'>) => {
-    const response = await apiClient.post('/patients', data)
-    return response.data
+  me: async () => {
+    const { data } = await apiClient.get<User>('/auth/me')
+    return data
   },
+}
 
-  update: async (id: string, data: Partial<Patient>) => {
-    const response = await apiClient.put(`/patients/${id}`, data)
-    return response.data
+export const patientAPI = {
+  list: async (limit = 100, offset = 0) => {
+    const { data } = await apiClient.get<Patient[]>('/patients', { params: { limit, offset } })
+    return data
   },
-
-  delete: async (id: string) => {
+  get: async (id: number) => {
+    const { data } = await apiClient.get<Patient>(`/patients/${id}`)
+    return data
+  },
+  create: async (payload: { identifier: string; display_name: string; notes?: string }) => {
+    const { data } = await apiClient.post<Patient>('/patients', payload)
+    return data
+  },
+  remove: async (id: number) => {
     await apiClient.delete(`/patients/${id}`)
   },
 }
 
-// Prediction APIs
 export const predictionAPI = {
-  predict: async (data: Record<string, unknown>) => {
-    const response = await apiClient.post('/predict', data)
-    return response.data as PredictionResult
+  schema: async () => {
+    const { data } = await apiClient.get<PredictionSchema>('/predictions/schema')
+    return data
   },
-
-  getHistory: async (patientId: string) => {
-    const response = await apiClient.get(`/patients/${patientId}/predictions`)
-    return response.data
-  },
-
-  savePrediction: async (patientId: string, prediction: PredictionResult) => {
-    const response = await apiClient.post(
+  create: async (patientId: number, input: GenomicInput) => {
+    const { data } = await apiClient.post<Prediction>(
       `/patients/${patientId}/predictions`,
-      prediction
+      input
     )
-    return response.data
+    return data
   },
-
-  generateReport: async (patientId: string) => {
-    const response = await apiClient.get(`/patients/${patientId}/report`, {
-      responseType: 'blob',
-    })
-    return response.data
+  get: async (id: number) => {
+    const { data } = await apiClient.get<Prediction>(`/predictions/${id}`)
+    return data
   },
-}
-
-// Chat APIs
-export const chatAPI = {
-  sendMessage: async (message: string, context?: Record<string, unknown>) => {
-    const response = await apiClient.post('/chat', {
-      message,
-      context,
-    })
-    return response.data as ChatMessage
+  history: async (patientId: number) => {
+    const { data } = await apiClient.get<Prediction[]>(`/patients/${patientId}/history`)
+    return data
   },
-
-  getHistory: async (conversationId: string) => {
-    const response = await apiClient.get(`/chat/history/${conversationId}`)
-    return response.data as ChatMessage[]
+  explanation: async (predictionId: number) => {
+    const { data } = await apiClient.get<Explanation>(
+      `/predictions/${predictionId}/explanation`
+    )
+    return data
+  },
+  globalImportance: async () => {
+    const { data } = await apiClient.get<GlobalImportance>('/explanations/global')
+    return data
   },
 }
 
-// Analytics APIs
 export const analyticsAPI = {
-  getDashboard: async () => {
-    const response = await apiClient.get('/analytics/dashboard')
-    return response.data as AnalyticsData
+  get: async () => {
+    const { data } = await apiClient.get<Analytics>('/analytics')
+    return data
   },
-
-  getRiskDistribution: async () => {
-    const response = await apiClient.get('/analytics/risk-distribution')
-    return response.data
-  },
-
-  getSeverityDistribution: async () => {
-    const response = await apiClient.get('/analytics/severity-distribution')
-    return response.data
-  },
-
-  getTrends: async (days = 30) => {
-    const response = await apiClient.get('/analytics/trends', {
-      params: { days },
-    })
-    return response.data
-  },
-}
-
-// SHAP APIs
-export const shapAPI = {
-  getExplanation: async (predictionId: string) => {
-    const response = await apiClient.get(`/shap/${predictionId}`)
-    return response.data
-  },
-
-  comparePredictions: async (ids: string[]) => {
-    const response = await apiClient.post('/shap/compare', { ids })
-    return response.data
-  },
-}
-
-export default {
-  patientAPI,
-  predictionAPI,
-  chatAPI,
-  analyticsAPI,
-  shapAPI,
 }
