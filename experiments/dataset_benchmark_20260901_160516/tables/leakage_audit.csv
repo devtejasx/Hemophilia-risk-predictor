@@ -1,0 +1,141 @@
+dataset,column,classification,reason
+D1_CHAMP,Variant Type,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,Mechanism,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,Domain,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,Subtype,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,In Poly A,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,Reported Clinical Severity,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,exon_number,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,codon_number,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,is_intron,SAFE,genomic/registry predictor used by the production pipeline
+D1_CHAMP,History of Inhibitor,TARGET,inhibitor outcome
+D1_CHAMP,HGVS cDNA,IDENTIFIER,near-unique identifier (2296 distinct values over 2296 labelled rows)
+D1_CHAMP,hg19 Coordinates,IDENTIFIER,near-unique genomic coordinate identifier
+D1_CHAMP,HGVS Protein,IDENTIFIER,near-unique identifier
+D1_CHAMP,Mature Protein,IDENTIFIER,near-unique identifier
+D1_CHAMP,Comments,METADATA,"free text, ~96% null"
+D1_CHAMP,Reference Number,DEFINITE LEAKAGE,"LEAKAGE: identifies the source publication, not the variant. Grouped by reference, some studies are 100% inhibitor-positive and others 0%, because inhibitor-focused papers report inhibitor-positive variants. Including it would let the model recover the label from the citation."
+D1_CHAMP,Year Reported,METADATA,"reporting artifact rather than biology, and the column contains an out-of-range 0.0"
+D1_CHAMP,Severe (<1 U/dL),METADATA,45-90% null; superseded by Reported Clinical Severity
+D1_CHAMP,Moderate (1-5 U/dL),METADATA,45-90% null; superseded by Reported Clinical Severity
+D1_CHAMP,Mild (>5 U/dL),METADATA,45-90% null; superseded by Reported Clinical Severity
+D1_CHAMP,No FVIII level given,METADATA,45-90% null; superseded by Reported Clinical Severity
+D1_CHAMP,Newly Added in the Current Version,METADATA,registry bookkeeping
+D2_MLReady,inhibitor_target,TARGET,binary inhibitor outcome derived from mmc3 records
+D2_MLReady,clinical_record_count,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,clotting_count,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,ratio_count,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,antigen_count,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,act_ant_count,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,Count_mut_id,DEFINITE LEAKAGE,"record-count column. The label rule excludes mutations whose records disagree, so count is mechanically anti-correlated with the target (clotting_count single-feature AUC 0.393, p=8.5e-21). This is label-construction leakage, not biology."
+D2_MLReady,ratio_mean,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,ratio_median,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,ratio_min,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,ratio_max,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,act_ant_mean,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,act_ant_median,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,act_ant_min,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,act_ant_max,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,antigen_mean,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,antigen_median,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,antigen_min,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,antigen_max,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,clotting_mean,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,clotting_median,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,clotting_min,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,clotting_max,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"aggregated FVIII activity/antigen. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome. The registry does not record assay timing relative to inhibitor development."
+D2_MLReady,uclotting,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,mutation-level FVIII activity/assay summary; timing relative to inhibitor development not established
+D2_MLReady,uratio,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,mutation-level FVIII activity/assay summary; timing relative to inhibitor development not established
+D2_MLReady,uantigen,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,mutation-level FVIII activity/assay summary; timing relative to inhibitor development not established
+D2_MLReady,udiscrep,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,mutation-level FVIII activity/assay summary; timing relative to inhibitor development not established
+D2_MLReady,utype,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,mutation-level FVIII activity/assay summary; timing relative to inhibitor development not established
+D2_MLReady,mut_syn,IDENTIFIER,near-unique variant nomenclature string (3574 distinct over 3706 rows)
+D2_MLReady,aa_syn,IDENTIFIER,near-unique variant nomenclature string (2971 distinct over 3706 rows)
+D2_MLReady,aa_change,IDENTIFIER,near-unique variant nomenclature string (1323 distinct over 3706 rows)
+D2_MLReady,codon_change,IDENTIFIER,near-unique variant nomenclature string (543 distinct over 3706 rows)
+D2_MLReady,g_id,METADATA,constant/near-constant gene identifier
+D2_MLReady,g_name,METADATA,constant/near-constant gene identifier
+D2_MLReady,n_bp,SAFE,size of the change in base pairs
+D2_MLReady,locnumb,SAFE,exon/intron location number (parsed to numeric)
+D2_MLReady,mut_type,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,mut_effect,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,d_id,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,location,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,e_i_numb,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,CpG,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,ntchange,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,aa_first,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,aa_last,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,codon_first,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,codon_last,SAFE,genomic variant descriptor available at genotyping
+D2_MLReady,aa_numb,SAFE,"genomic position, available at genotyping"
+D2_MLReady,nuc_numb,SAFE,"genomic position, available at genotyping"
+D2_MLReady,aa_numb_old,METADATA,"superseded numbering, duplicates aa_numb"
+D3_MMC2_Genomic,uinhibitor,TARGET,"curator's mutation-level inhibitor summary; raw values {'not reported': 3199, 'no': 1720, 'nan': 796, 'yes': 495, 'not affected': 1}"
+D3_MMC2_Genomic,mut_id,IDENTIFIER,mutation row id
+D3_MMC2_Genomic,Date added to HADB,METADATA,curation bookkeeping / free text / constant
+D3_MMC2_Genomic,ucomments,METADATA,curation bookkeeping / free text / constant
+D3_MMC2_Genomic,mutations,METADATA,curation bookkeeping / free text / constant
+D3_MMC2_Genomic,g_id,METADATA,curation bookkeeping / free text / constant
+D3_MMC2_Genomic,g_name,METADATA,curation bookkeeping / free text / constant
+D3_MMC2_Genomic,mut_syn,IDENTIFIER,near-unique nomenclature string (5847 distinct)
+D3_MMC2_Genomic,aa_syn,IDENTIFIER,near-unique nomenclature string (4579 distinct)
+D3_MMC2_Genomic,aa_change,IDENTIFIER,near-unique nomenclature string (1560 distinct)
+D3_MMC2_Genomic,codon_change,IDENTIFIER,near-unique nomenclature string (675 distinct)
+D3_MMC2_Genomic,useverity,POST-OUTCOME,"clinical severity summary. Severe disease is both a strong inhibitor risk factor and, via FVIII assays, affected by inhibitors. Excluded from the genomic-only design to keep this dataset's contrast clean."
+D3_MMC2_Genomic,uclotting,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,FVIII activity/assay summary; timing vs inhibitor development not established
+D3_MMC2_Genomic,uratio,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,FVIII activity/assay summary; timing vs inhibitor development not established
+D3_MMC2_Genomic,uantigen,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,FVIII activity/assay summary; timing vs inhibitor development not established
+D3_MMC2_Genomic,udiscrep,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,FVIII activity/assay summary; timing vs inhibitor development not established
+D3_MMC2_Genomic,utype,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,FVIII activity/assay summary; timing vs inhibitor development not established
+D3_MMC2_Genomic,Count_mut_id,POTENTIAL LEAKAGE,"number of clinical records for the mutation; reporting intensity, not biology"
+D3_MMC2_Genomic,aa_numb_old,METADATA,superseded numbering
+D3_MMC2_Genomic,mut_type,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,mut_effect,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,d_id,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,location,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,e_i_numb,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,CpG,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,ntchange,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,aa_first,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,aa_last,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,codon_first,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,codon_last,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,n_bp,SAFE,genomic variant descriptor available at genotyping
+D3_MMC2_Genomic,aa_numb,SAFE,"genomic position, available at genotyping"
+D3_MMC2_Genomic,locnumb_num,SAFE,"genomic position, available at genotyping"
+D3_MMC2_Genomic,nuc_numb_num,SAFE,"genomic position, available at genotyping"
+D4_MMC3_ClinicalRecord,Inhibitors,TARGET,"per-record inhibitor status; raw values {'no': 4130, 'not reported': 2090, 'nan': 1730, 'not': 1276, 'yes': 836, 'mild': 1, 'severe': 1}"
+D4_MMC3_ClinicalRecord,all_id,IDENTIFIER,clinical record id
+D4_MMC3_ClinicalRecord,mut_id,IDENTIFIER,"mutation id - used as the CV grouping key, not a feature"
+D4_MMC3_ClinicalRecord,pa_id,IDENTIFIER,"lab-local patient code. 70.9% missing, values include '?' and '1', and one code carries 322 records. NOT a global patient key."
+D4_MMC3_ClinicalRecord,reference,METADATA,source publication
+D4_MMC3_ClinicalRecord,ref_id,METADATA,source publication id
+D4_MMC3_ClinicalRecord,pub_lab,METADATA,reporting laboratory
+D4_MMC3_ClinicalRecord,date added,METADATA,curation date
+D4_MMC3_ClinicalRecord,comments,METADATA,free text
+D4_MMC3_ClinicalRecord,pri_comments,METADATA,free text
+D4_MMC3_ClinicalRecord,mutations,METADATA,curation flag
+D4_MMC3_ClinicalRecord,subgroups,METADATA,only 21 non-null of 10064
+D4_MMC3_ClinicalRecord,bleed_tool,METADATA,only 2 non-null
+D4_MMC3_ClinicalRecord,bleed_score,METADATA,entirely empty
+D4_MMC3_ClinicalRecord,assay,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,assay type; only 77 non-null
+D4_MMC3_ClinicalRecord,discrep,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,only 84 non-null
+D4_MMC3_ClinicalRecord,clotting,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"FVIII activity/antigen measurement. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome; the registry does not record assay timing."
+D4_MMC3_ClinicalRecord,ratio,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"FVIII activity/antigen measurement. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome; the registry does not record assay timing."
+D4_MMC3_ClinicalRecord,antigen,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"FVIII activity/antigen measurement. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome; the registry does not record assay timing."
+D4_MMC3_ClinicalRecord,act/ant,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"FVIII activity/antigen measurement. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome; the registry does not record assay timing."
+D4_MMC3_ClinicalRecord,type,UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED,"FVIII activity/antigen measurement. Inhibitors neutralise FVIII, so a post-inhibitor assay reflects the outcome; the registry does not record assay timing."
+D4_MMC3_ClinicalRecord,cli_phe,POTENTIAL LEAKAGE,"clinical phenotype/severity. A genuine pre-treatment risk factor, but also partly derived from FVIII assays. Kept as SAFE only in the clinical variant of this dataset; see notes."
+D4_MMC3_ClinicalRecord,pa_race,SAFE,"reported ancestry, recorded at enrolment. Included because ancestry is an established inhibitor risk factor in the literature; it is used here descriptively and must not become a clinical decision rule."
+D4_MMC3_ClinicalRecord,mut_type,SAFE,genomic descriptor joined from mmc2 on mut_id
+D4_MMC3_ClinicalRecord,mut_effect,SAFE,genomic descriptor joined from mmc2 on mut_id
+D4_MMC3_ClinicalRecord,location,SAFE,genomic descriptor joined from mmc2 on mut_id
+D4_MMC3_ClinicalRecord,d_id,SAFE,genomic descriptor joined from mmc2 on mut_id
+D4_MMC3_ClinicalRecord,CpG,SAFE,genomic descriptor joined from mmc2 on mut_id
+D4_MMC3_ClinicalRecord,e_i_numb,SAFE,genomic descriptor joined from mmc2 on mut_id
+D5_Merged_LEAKY,inhibitor_positive_rate,DEFINITE LEAKAGE,the target expressed as a rate
+D5_Merged_LEAKY,inhibitor_yes_count,DEFINITE LEAKAGE,count of positive outcomes for this mutation
+D5_Merged_LEAKY,inhibitor_no_count,DEFINITE LEAKAGE,count of negative outcomes for this mutation
+D5_Merged_LEAKY,inhibitor_total_known,DEFINITE LEAKAGE,denominator of the outcome aggregation
+D5_Merged_LEAKY,uinhibitor,DEFINITE LEAKAGE,a second copy of the inhibitor outcome

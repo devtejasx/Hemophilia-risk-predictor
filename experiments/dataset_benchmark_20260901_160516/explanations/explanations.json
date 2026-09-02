@@ -1,0 +1,962 @@
+{
+  "D1_CHAMP": {
+    "dataset": "D1_CHAMP",
+    "explained_model": "RandomForest",
+    "requested_model": "RandomForest",
+    "note": null,
+    "shap": {
+      "available": true,
+      "global_importance": [
+        {
+          "feature": "Reported Clinical Severity",
+          "mean_abs_shap": 0.086945
+        },
+        {
+          "feature": "Variant Type",
+          "mean_abs_shap": 0.078751
+        },
+        {
+          "feature": "Domain",
+          "mean_abs_shap": 0.042197
+        },
+        {
+          "feature": "Mechanism",
+          "mean_abs_shap": 0.038397
+        },
+        {
+          "feature": "Subtype",
+          "mean_abs_shap": 0.035179
+        },
+        {
+          "feature": "codon_number",
+          "mean_abs_shap": 0.033663
+        },
+        {
+          "feature": "exon_number",
+          "mean_abs_shap": 0.023131
+        },
+        {
+          "feature": "In Poly A",
+          "mean_abs_shap": 0.002233
+        },
+        {
+          "feature": "is_intron",
+          "mean_abs_shap": 0.001513
+        }
+      ],
+      "direction": [
+        {
+          "feature": "codon_number",
+          "corr_value_vs_shap": 0.6816,
+          "direction": "higher value raises risk"
+        },
+        {
+          "feature": "exon_number",
+          "corr_value_vs_shap": 0.4844,
+          "direction": "higher value raises risk"
+        },
+        {
+          "feature": "is_intron",
+          "corr_value_vs_shap": -0.3451,
+          "direction": "higher value lowers risk"
+        }
+      ]
+    },
+    "lime": {
+      "available": true,
+      "examples": [
+        {
+          "case": "highest_risk",
+          "test_row": 144,
+          "predicted_probability": 0.93709,
+          "true_label": 1,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Mild <= 0.00",
+              "source_feature": "Reported",
+              "weight": 0.122941,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Subtype_multiple domains > 0.00",
+              "source_feature": "Subtype",
+              "weight": 0.081052,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "0.00 < cat__Reported Clinical Severity_Severe <= 1.00",
+              "source_feature": "0.00",
+              "weight": 0.080428,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Variant Type_Missense <= 0.00",
+              "source_feature": "Variant",
+              "weight": 0.058547,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Moderate <= 0.00",
+              "source_feature": "Reported",
+              "weight": 0.05546,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Domain_A1 <= 0.00",
+              "source_feature": "Domain",
+              "weight": 0.045838,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Variant Type_Large structural change (>50 bp) > 0.00",
+              "source_feature": "Variant",
+              "weight": 0.036643,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Variant Type_Frameshift <= 0.00",
+              "source_feature": "Variant",
+              "weight": -0.032053,
+              "direction": "decreases"
+            }
+          ]
+        },
+        {
+          "case": "lowest_risk",
+          "test_row": 87,
+          "predicted_probability": 0.06129,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Mild > 0.00",
+              "source_feature": "Reported",
+              "weight": -0.123301,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Severe <= 0.00",
+              "source_feature": "Reported",
+              "weight": -0.080878,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Subtype_multiple domains <= 0.00",
+              "source_feature": "Subtype",
+              "weight": -0.075442,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "0.00 < cat__Variant Type_Missense <= 1.00",
+              "source_feature": "0.00",
+              "weight": -0.056898,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Moderate <= 0.00",
+              "source_feature": "Reported",
+              "weight": 0.052429,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Domain_A1 > 0.00",
+              "source_feature": "Domain",
+              "weight": -0.04663,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "num__exon_number <= -0.79",
+              "source_feature": "exon_number",
+              "weight": -0.044341,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "num__codon_number <= -0.90",
+              "source_feature": "codon_number",
+              "weight": -0.042058,
+              "direction": "decreases"
+            }
+          ]
+        },
+        {
+          "case": "borderline",
+          "test_row": 49,
+          "predicted_probability": 0.501595,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Mild > 0.00",
+              "source_feature": "Reported",
+              "weight": -0.122421,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Severe <= 0.00",
+              "source_feature": "Reported",
+              "weight": -0.082024,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Subtype_multiple domains <= 0.00",
+              "source_feature": "Subtype",
+              "weight": -0.076013,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__Variant Type_Missense <= 0.00",
+              "source_feature": "Variant",
+              "weight": 0.056043,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Reported Clinical Severity_Moderate <= 0.00",
+              "source_feature": "Reported",
+              "weight": 0.051738,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__Domain_A1 <= 0.00",
+              "source_feature": "Domain",
+              "weight": 0.046601,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "num__exon_number <= -0.79",
+              "source_feature": "exon_number",
+              "weight": -0.041984,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "num__codon_number <= -0.90",
+              "source_feature": "codon_number",
+              "weight": -0.041207,
+              "direction": "decreases"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "D2_MLReady": {
+    "dataset": "D2_MLReady",
+    "explained_model": "LightGBM",
+    "requested_model": "StackingEnsemble",
+    "note": "The best model was StackingEnsemble, which is not a tree model; TreeSHAP was run on LightGBM instead and this is reported as a surrogate, not as an explanation of StackingEnsemble.",
+    "shap": {
+      "available": true,
+      "global_importance": [
+        {
+          "feature": "aa_first",
+          "mean_abs_shap": 0.739706
+        },
+        {
+          "feature": "ntchange",
+          "mean_abs_shap": 0.724468
+        },
+        {
+          "feature": "nuc_numb",
+          "mean_abs_shap": 0.675011
+        },
+        {
+          "feature": "aa_last",
+          "mean_abs_shap": 0.520966
+        },
+        {
+          "feature": "mut_effect",
+          "mean_abs_shap": 0.511465
+        },
+        {
+          "feature": "e_i_numb",
+          "mean_abs_shap": 0.505179
+        },
+        {
+          "feature": "CpG",
+          "mean_abs_shap": 0.454721
+        },
+        {
+          "feature": "aa_numb",
+          "mean_abs_shap": 0.453662
+        },
+        {
+          "feature": "codon_first",
+          "mean_abs_shap": 0.397505
+        },
+        {
+          "feature": "d_id",
+          "mean_abs_shap": 0.305156
+        },
+        {
+          "feature": "mut_type",
+          "mean_abs_shap": 0.238472
+        },
+        {
+          "feature": "location",
+          "mean_abs_shap": 0.220987
+        },
+        {
+          "feature": "codon_last",
+          "mean_abs_shap": 0.160554
+        },
+        {
+          "feature": "n_bp",
+          "mean_abs_shap": 0.137095
+        },
+        {
+          "feature": "locnumb_num",
+          "mean_abs_shap": 0.110786
+        }
+      ],
+      "direction": [
+        {
+          "feature": "nuc_numb",
+          "corr_value_vs_shap": 0.5148,
+          "direction": "higher value raises risk"
+        },
+        {
+          "feature": "aa_numb",
+          "corr_value_vs_shap": -0.1581,
+          "direction": "higher value lowers risk"
+        }
+      ]
+    },
+    "lime": {
+      "available": true,
+      "examples": [
+        {
+          "case": "highest_risk",
+          "test_row": 657,
+          "predicted_probability": 0.991821,
+          "true_label": 1,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__CpG___missing__ > 0.00",
+              "source_feature": "CpG",
+              "weight": 0.304807,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains > 0.00",
+              "source_feature": "d_id",
+              "weight": 0.235183,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTG <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.217105,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTT <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.204704,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_2 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.150135,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__codon_last_CAT <= 0.00",
+              "source_feature": "codon_last",
+              "weight": -0.132905,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_last_AAG <= 0.00",
+              "source_feature": "codon_last",
+              "weight": -0.107618,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CAA <= 0.00",
+              "source_feature": "codon_first",
+              "weight": 0.100078,
+              "direction": "increases"
+            }
+          ]
+        },
+        {
+          "case": "lowest_risk",
+          "test_row": 27,
+          "predicted_probability": 0.000296,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__CpG___missing__ <= 0.00",
+              "source_feature": "CpG",
+              "weight": -0.287884,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__mut_type_infrequent_sklearn <= 0.00",
+              "source_feature": "mut_type",
+              "weight": -0.240369,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTG <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.240024,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.230847,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "num__nuc_numb <= -0.95",
+              "source_feature": "nuc_numb",
+              "weight": -0.167286,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_ATA <= 0.00",
+              "source_feature": "codon_first",
+              "weight": 0.163669,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTT <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.140451,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__aa_first_infrequent_sklearn <= 0.00",
+              "source_feature": "aa_first",
+              "weight": -0.072913,
+              "direction": "decreases"
+            }
+          ]
+        },
+        {
+          "case": "borderline",
+          "test_row": 658,
+          "predicted_probability": 0.503425,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__CpG___missing__ <= 0.00",
+              "source_feature": "CpG",
+              "weight": -0.278273,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTG <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.249482,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.224535,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_last_CAT <= 0.00",
+              "source_feature": "codon_last",
+              "weight": -0.208541,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_CTT <= 0.00",
+              "source_feature": "codon_first",
+              "weight": -0.175777,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_2 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.1442,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__codon_first_GAA <= 0.00",
+              "source_feature": "codon_first",
+              "weight": 0.131761,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__aa_first_Gly <= 0.00",
+              "source_feature": "aa_first",
+              "weight": 0.124205,
+              "direction": "increases"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "D3_MMC2_Genomic": {
+    "dataset": "D3_MMC2_Genomic",
+    "explained_model": "RandomForest",
+    "requested_model": "RandomForest",
+    "note": null,
+    "shap": {
+      "available": true,
+      "global_importance": [
+        {
+          "feature": "mut_effect",
+          "mean_abs_shap": 0.042533
+        },
+        {
+          "feature": "CpG",
+          "mean_abs_shap": 0.039805
+        },
+        {
+          "feature": "mut_type",
+          "mean_abs_shap": 0.038781
+        },
+        {
+          "feature": "e_i_numb",
+          "mean_abs_shap": 0.030363
+        },
+        {
+          "feature": "d_id",
+          "mean_abs_shap": 0.029883
+        },
+        {
+          "feature": "n_bp",
+          "mean_abs_shap": 0.024687
+        },
+        {
+          "feature": "aa_last",
+          "mean_abs_shap": 0.022935
+        },
+        {
+          "feature": "ntchange",
+          "mean_abs_shap": 0.017737
+        },
+        {
+          "feature": "codon_first",
+          "mean_abs_shap": 0.017251
+        },
+        {
+          "feature": "aa_first",
+          "mean_abs_shap": 0.016793
+        },
+        {
+          "feature": "nuc_numb_num",
+          "mean_abs_shap": 0.014477
+        },
+        {
+          "feature": "codon_last",
+          "mean_abs_shap": 0.012677
+        },
+        {
+          "feature": "aa_numb",
+          "mean_abs_shap": 0.012106
+        },
+        {
+          "feature": "locnumb_num",
+          "mean_abs_shap": 0.010345
+        },
+        {
+          "feature": "location",
+          "mean_abs_shap": 0.005576
+        }
+      ],
+      "direction": []
+    },
+    "lime": {
+      "available": true,
+      "examples": [
+        {
+          "case": "highest_risk",
+          "test_row": 407,
+          "predicted_probability": 0.901398,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains > 0.00",
+              "source_feature": "d_id",
+              "weight": 0.070216,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__CpG___missing__ <= 0.00",
+              "source_feature": "CpG",
+              "weight": -0.067056,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_13 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.062501,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Missense <= 0.00",
+              "source_feature": "mut_effect",
+              "weight": 0.044047,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_infrequent_sklearn > 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.042759,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__mut_type_Point <= 0.00",
+              "source_feature": "mut_type",
+              "weight": 0.037921,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Large Deletion > 0.00",
+              "source_feature": "mut_effect",
+              "weight": 0.03635,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_4 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.035096,
+              "direction": "increases"
+            }
+          ]
+        },
+        {
+          "case": "lowest_risk",
+          "test_row": 59,
+          "predicted_probability": 0.075011,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__e_i_numb_13 > 0.00",
+              "source_feature": "e_i_numb",
+              "weight": -0.067739,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__CpG___missing__ <= 0.00",
+              "source_feature": "CpG",
+              "weight": -0.067037,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.059839,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_infrequent_sklearn <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": -0.042653,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "0.00 < cat__mut_effect_Missense <= 1.00",
+              "source_feature": "0.00",
+              "weight": -0.042472,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "0.00 < cat__mut_type_Point <= 1.00",
+              "source_feature": "0.00",
+              "weight": -0.038406,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Large Deletion <= 0.00",
+              "source_feature": "mut_effect",
+              "weight": -0.037659,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_4 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.036052,
+              "direction": "increases"
+            }
+          ]
+        },
+        {
+          "case": "borderline",
+          "test_row": 109,
+          "predicted_probability": 0.499734,
+          "true_label": 1,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__CpG___missing__ <= 0.00",
+              "source_feature": "CpG",
+              "weight": -0.067532,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_13 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.064231,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.053262,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Missense <= 0.00",
+              "source_feature": "mut_effect",
+              "weight": 0.041929,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_4 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.039161,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_infrequent_sklearn <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": -0.037939,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Large Deletion <= 0.00",
+              "source_feature": "mut_effect",
+              "weight": -0.03556,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__mut_effect_Large deletion <= 0.00",
+              "source_feature": "mut_effect",
+              "weight": -0.034949,
+              "direction": "decreases"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "D4_MMC3_ClinicalRecord": {
+    "dataset": "D4_MMC3_ClinicalRecord",
+    "explained_model": "LightGBM",
+    "requested_model": "ResidualMLP",
+    "note": "The best model was ResidualMLP, which is not a tree model; TreeSHAP was run on LightGBM instead and this is reported as a surrogate, not as an explanation of ResidualMLP.",
+    "shap": {
+      "available": true,
+      "global_importance": [
+        {
+          "feature": "e_i_numb",
+          "mean_abs_shap": 0.942226
+        },
+        {
+          "feature": "pa_race",
+          "mean_abs_shap": 0.844032
+        },
+        {
+          "feature": "cli_phe",
+          "mean_abs_shap": 0.833308
+        },
+        {
+          "feature": "d_id",
+          "mean_abs_shap": 0.628259
+        },
+        {
+          "feature": "mut_effect",
+          "mean_abs_shap": 0.5264
+        },
+        {
+          "feature": "mut_type",
+          "mean_abs_shap": 0.229463
+        },
+        {
+          "feature": "CpG",
+          "mean_abs_shap": 0.223257
+        },
+        {
+          "feature": "location",
+          "mean_abs_shap": 0.099034
+        }
+      ],
+      "direction": []
+    },
+    "lime": {
+      "available": true,
+      "examples": [
+        {
+          "case": "highest_risk",
+          "test_row": 969,
+          "predicted_probability": 0.998223,
+          "true_label": 1,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__pa_race_Japan > 0.00",
+              "source_feature": "pa_race",
+              "weight": 0.43599,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_6 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.276217,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__pa_race_Italy <= 0.00",
+              "source_feature": "pa_race",
+              "weight": -0.237489,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Mild <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.219743,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Moderate <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.216302,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains > 0.00",
+              "source_feature": "d_id",
+              "weight": 0.208779,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_1 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.176776,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_5UTR <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": -0.141584,
+              "direction": "decreases"
+            }
+          ]
+        },
+        {
+          "case": "lowest_risk",
+          "test_row": 769,
+          "predicted_probability": 0.000749,
+          "true_label": 0,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__pa_race_Japan <= 0.00",
+              "source_feature": "pa_race",
+              "weight": -0.396884,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_6 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.269368,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__pa_race_Italy <= 0.00",
+              "source_feature": "pa_race",
+              "weight": -0.253181,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.227287,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Mild <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.226867,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_1 > 0.00",
+              "source_feature": "e_i_numb",
+              "weight": -0.20603,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Moderate > 0.00",
+              "source_feature": "cli_phe",
+              "weight": -0.199683,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_infrequent_sklearn <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.143282,
+              "direction": "increases"
+            }
+          ]
+        },
+        {
+          "case": "borderline",
+          "test_row": 239,
+          "predicted_probability": 0.501881,
+          "true_label": 1,
+          "top_contributions": [
+            {
+              "encoded_rule": "cat__pa_race_Japan <= 0.00",
+              "source_feature": "pa_race",
+              "weight": -0.40543,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_6 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.275501,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Mild <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.23209,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__pa_race_Italy <= 0.00",
+              "source_feature": "pa_race",
+              "weight": -0.215533,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__cli_phe_Moderate <= 0.00",
+              "source_feature": "cli_phe",
+              "weight": 0.200932,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__d_id_Multiple Domains <= 0.00",
+              "source_feature": "d_id",
+              "weight": -0.199768,
+              "direction": "decreases"
+            },
+            {
+              "encoded_rule": "cat__pa_race_Portugal <= 0.00",
+              "source_feature": "pa_race",
+              "weight": 0.175244,
+              "direction": "increases"
+            },
+            {
+              "encoded_rule": "cat__e_i_numb_1 <= 0.00",
+              "source_feature": "e_i_numb",
+              "weight": 0.168129,
+              "direction": "increases"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "D5_Merged_LEAKY": {
+    "dataset": "D5_Merged_LEAKY",
+    "skipped": true,
+    "reason": "rejected for the primary benchmark (leakage)"
+  }
+}

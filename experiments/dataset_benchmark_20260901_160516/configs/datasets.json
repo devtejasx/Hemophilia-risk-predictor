@@ -1,0 +1,188 @@
+{
+  "D1_CHAMP": {
+    "source_file": "ml\\data\\champ.csv",
+    "sha256": "73aced5b169904a54af37f1372b32eccd52d4d288f69190a1892263a50e016dd",
+    "prediction_unit": "mutation (F8 variant)",
+    "unit_rationale": "One row per distinct HGVS cDNA variant; 0 duplicated variants among labelled rows. 'History of Inhibitor' is a registry aggregation over the reports for that variant, so the unit is the variant, not a patient.",
+    "target_name": "History of Inhibitor",
+    "target_definition": "Yes -> 1, No -> 0. 'Not reported' (1742) and blank (12) excluded, never imputed. Verified from raw value counts.",
+    "valid_for_supervised": true,
+    "rejection_reason": null,
+    "notes": [
+      "Reuses ml/preprocessing/champ.py unchanged (the production pipeline).",
+      "Domain is deliberately NOT case-folded: a1/a2/a3 are acidic regions, distinct from the A1/A2/A3 domains.",
+      "1754 rows excluded for having no reported inhibitor history; that exclusion is very unlikely to be random."
+    ],
+    "safe_features": {
+      "categorical": [
+        "Variant Type",
+        "Mechanism",
+        "Domain",
+        "Subtype",
+        "In Poly A",
+        "Reported Clinical Severity"
+      ],
+      "numeric": [
+        "exon_number",
+        "codon_number",
+        "is_intron"
+      ]
+    },
+    "audit_counts": {
+      "SAFE": 9,
+      "METADATA": 7,
+      "IDENTIFIER": 4,
+      "TARGET": 1,
+      "DEFINITE LEAKAGE": 1
+    }
+  },
+  "D2_MLReady": {
+    "source_file": "HemophiliaA_ML_Ready_Inhibitor.csv",
+    "sha256": "cc6a408925a0bc37ed355befd3d96c631697d8ac425fafab4402f2901c41ddfe",
+    "prediction_unit": "mutation (F8 variant)",
+    "unit_rationale": "3706 rows, one per mut_id. Built by aggregating mmc3 clinical records up to the mutation. It is NOT patient-level: mmc3's pa_id is missing for 70.9% of records and is not a global patient key.",
+    "target_name": "inhibitor_target",
+    "target_definition": "1 if every known mmc3 record for the mutation reports an inhibitor, 0 if every known record reports none. Mutations with no known record (2378) and with disagreeing records (127) were dropped by the dataset's authors. Verified: reproduced exactly from mmc3 (agreement 1.000).",
+    "valid_for_supervised": true,
+    "rejection_reason": null,
+    "notes": [
+      "Excluding the 127 conflicting mutations makes the label cleaner but biased: it removes exactly the mutations with mixed clinical evidence.",
+      "Record-count columns are excluded as construction leakage; a sensitivity run quantifies what including them would buy.",
+      "FVIII activity aggregates are excluded as UNKNOWN temporal validity."
+    ],
+    "safe_features": {
+      "categorical": [
+        "mut_type",
+        "mut_effect",
+        "d_id",
+        "location",
+        "e_i_numb",
+        "CpG",
+        "ntchange",
+        "aa_first",
+        "aa_last",
+        "codon_first",
+        "codon_last",
+        "n_bp"
+      ],
+      "numeric": [
+        "aa_numb",
+        "nuc_numb",
+        "locnumb_num"
+      ]
+    },
+    "audit_counts": {
+      "UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED": 21,
+      "SAFE": 15,
+      "DEFINITE LEAKAGE": 6,
+      "IDENTIFIER": 4,
+      "METADATA": 3,
+      "TARGET": 1
+    }
+  },
+  "D3_MMC2_Genomic": {
+    "source_file": "BVTH_VTH-2024-000215-mmc2.csv",
+    "sha256": "d64fbd90654d329a15a7fc2dc942536f1468b4a0b031b3d2854c79916e45b75d",
+    "prediction_unit": "mutation (F8 variant)",
+    "unit_rationale": "6211 rows, mut_id unique. Mutation-level by construction.",
+    "target_name": "uinhibitor",
+    "target_definition": "Yes -> 1 (495), No/Not affected -> 0 (1721). 'Not reported'/'Not' and blanks excluded. Case and whitespace variants normalised. This is the curator's own mutation-level summary, an INDEPENDENT label source from D2's record-derived target.",
+    "valid_for_supervised": true,
+    "rejection_reason": null,
+    "notes": [
+      "Genomic-only by design: this dataset answers 'can the variant alone predict inhibitor risk?'",
+      "useverity excluded as POST-OUTCOME to keep the genomic contrast clean."
+    ],
+    "safe_features": {
+      "categorical": [
+        "mut_type",
+        "mut_effect",
+        "d_id",
+        "location",
+        "e_i_numb",
+        "CpG",
+        "ntchange",
+        "aa_first",
+        "aa_last",
+        "codon_first",
+        "codon_last",
+        "n_bp"
+      ],
+      "numeric": [
+        "aa_numb",
+        "locnumb_num",
+        "nuc_numb_num"
+      ]
+    },
+    "audit_counts": {
+      "SAFE": 15,
+      "METADATA": 6,
+      "IDENTIFIER": 5,
+      "UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED": 5,
+      "TARGET": 1,
+      "POST-OUTCOME": 1,
+      "POTENTIAL LEAKAGE": 1
+    }
+  },
+  "D4_MMC3_ClinicalRecord": {
+    "source_file": "BVTH_VTH-2024-000215-mmc3.csv",
+    "sha256": "f6bb8b1e6e867292fca185580f0d7db0ce5596e03089a7c8d4500b0bd89431fa",
+    "prediction_unit": "clinical record (one reported observation)",
+    "unit_rationale": "10064 rows, all_id unique, mut_id repeats. pa_id cannot serve as a patient key (70.9% missing, non-unique placeholders), so this is record-level, NOT patient-level. Rows sharing a mut_id are not independent, so all splits and CV folds are GROUPED BY mut_id.",
+    "target_name": "Inhibitors",
+    "target_definition": "Yes -> 1 (836), No -> 0 (4130). 'Not reported'/'Not' (3366) and blanks (1730) excluded. Two rows holding severity values ('Mild','Severe') in the inhibitor column are treated as unknown and excluded.",
+    "valid_for_supervised": true,
+    "rejection_reason": null,
+    "notes": [
+      "GROUPED splitting by mut_id is mandatory here. A random split would put records of the same mutation in both train and test and inflate scores.",
+      "cli_phe (clinical phenotype) is retained as a predictor: it is the closest thing this benchmark has to a genuine clinical risk factor. It is partly assay-derived, so it is flagged and a sensitivity run drops it.",
+      "This is the only dataset supporting a clinical (non-genomic-only) design."
+    ],
+    "safe_features": {
+      "categorical": [
+        "cli_phe",
+        "pa_race",
+        "mut_type",
+        "mut_effect",
+        "location",
+        "d_id",
+        "CpG",
+        "e_i_numb"
+      ],
+      "numeric": []
+    },
+    "audit_counts": {
+      "METADATA": 10,
+      "UNKNOWN - TEMPORAL VALIDITY NOT ESTABLISHED": 7,
+      "SAFE": 7,
+      "IDENTIFIER": 3,
+      "TARGET": 1,
+      "POTENTIAL LEAKAGE": 1
+    }
+  },
+  "D5_Merged_LEAKY": {
+    "source_file": "HemophiliaA_Merged_MMC2_MMC3.csv",
+    "sha256": "2c34ff13a8b17810924c0de9633917a6e57c2499ef96ed3d21b6c5269a058f30",
+    "prediction_unit": "mutation (F8 variant)",
+    "unit_rationale": "6211 rows, mut_id unique.",
+    "target_name": "derived from inhibitor_yes_count > 0",
+    "target_definition": "1 if inhibitor_yes_count > 0 among mutations with any known record.",
+    "valid_for_supervised": false,
+    "rejection_reason": "Carries four outcome-derived aggregate columns (inhibitor_yes_count, inhibitor_no_count, inhibitor_total_known, inhibitor_positive_rate) plus a duplicate outcome column (uinhibitor). Any target definable from this file is a deterministic function of those columns. Excluded from the primary benchmark and run ONLY to quantify how large a leakage-driven score can look.",
+    "notes": [
+      "Not a valid predictive dataset. Its non-leaky genomic content is exactly D3_MMC2_Genomic, which is benchmarked properly."
+    ],
+    "safe_features": {
+      "categorical": [],
+      "numeric": [
+        "inhibitor_yes_count",
+        "inhibitor_no_count",
+        "inhibitor_total_known",
+        "inhibitor_positive_rate"
+      ]
+    },
+    "audit_counts": {
+      "DEFINITE LEAKAGE": 5
+    }
+  }
+}

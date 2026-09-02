@@ -1,0 +1,5 @@
+label_scheme,feature_set,n_rows,n_positive,roc_auc,pr_auc,n_features_encoded
+yes_vs_no (this benchmark),genomic classes only (this benchmark),2296,461,0.7158996928166351,0.46415770277594304,47
+yes_vs_no (this benchmark),+ HGVS cDNA / hg19 / HGVS Protein identifiers (paper-style),2296,461,0.7151760396975424,0.462082284205216,52
+yes_vs_rest (all 4050 rows),genomic classes only (this benchmark),4050,461,0.6381555044204916,0.2384307805870323,53
+yes_vs_rest (all 4050 rows),+ HGVS cDNA / hg19 / HGVS Protein identifiers (paper-style),4050,461,0.6374894029308465,0.24639304034641263,60

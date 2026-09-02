@@ -1,0 +1,9 @@
+analysis,dataset,roc_auc,pr_auc,n_features_encoded
+D2_MLReady safe features only (primary),D2_MLReady,0.7345853558917324,0.40922981409754117,308
+D2_MLReady + record-count columns (EXCLUDED as construction leakage),D2_MLReady,0.7516533923998931,0.4090452535395478,315
+D2_MLReady + FVIII assay aggregates (EXCLUDED: unknown timing),D2_MLReady,0.7599399908886689,0.42723634762727664,340
+"D4 grouped split by mut_id (primary, correct)",D4_MMC3_ClinicalRecord,0.7527946528251004,0.506616772424102,116
+D4 UNGROUPED random split (INCORRECT - same mutation on both sides),D4_MMC3_ClinicalRecord,0.8088249136551564,0.5656874399619737,113
+"D4 grouped, without cli_phe (clinical phenotype)",D4_MMC3_ClinicalRecord,0.7246596395586551,0.4919116664476123,106
+D3 safe genomic only (primary),D3_MMC2_Genomic,0.7089445176401699,0.4325668453652388,282
+D3 + useverity (EXCLUDED as POST-OUTCOME),D3_MMC2_Genomic,0.7387790953008345,0.47790644702659174,288
