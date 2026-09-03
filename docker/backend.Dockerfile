@@ -1,4 +1,4 @@
-# Backend API + CHAMP inference.
+# Backend API + MMC2/MMC3 inference.
 # Build from the repository root:
 #   docker build -f docker/backend.Dockerfile -t hemophilia-api .
 FROM python:3.11-slim

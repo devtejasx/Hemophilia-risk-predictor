@@ -4,7 +4,7 @@ Promoted from the previous single-file backend_api.py, which the Phase 0 audit
 selected as the canonical backend: it was the only one that imported, the only
 one serving the /api/* routes the SPA calls, and the only one with working JWT
 auth and per-user row scoping. Its hand-written risk formula is replaced by the
-CHAMP model in ml/; its auth moves from unsalted SHA-256 to bcrypt.
+MMC2 + MMC3 models in ml/; its auth moves from unsalted SHA-256 to bcrypt.
 
 Run:  uvicorn backend.main:app --reload
 """
@@ -32,13 +32,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 DESCRIPTION = """
-Explainable Hemophilia A inhibitor-risk prediction, built on the CHAMP
-(CDC Hemophilia A Mutation Project) variant registry.
+Explainable Hemophilia A inhibitor-risk prediction, built on the **MMC2 +
+MMC3** Hemophilia A tables joined on `mut_id`. The target is MMC3's
+`Inhibitors` field (Yes = 1, No = 0).
 
-**This is a research prototype.** Estimates are attributed to an F8 *variant*,
-not to an individual patient, are not clinically validated, and must not be used
-for standalone diagnosis or treatment decisions. The API never recommends a
-course of treatment.
+Three prediction modes are served, matching the feature blocks of the reference
+analysis:
+
+* `genomic` — the MMC2 mutation description
+* `clinical` — the MMC3 clinical record
+* `merged` — both (the default; it discriminates best)
+
+**This is a research prototype.** Estimates are attributed to a *reported
+record*, not to an individual patient, are not clinically validated, and must
+not be used for standalone diagnosis or treatment decisions. The API never
+recommends a course of treatment.
 """
 
 
@@ -81,8 +89,9 @@ async def lifespan(app: FastAPI):
 
     if not ml.is_ready():
         logger.error(
-            "Starting without a usable model. Prediction endpoints will return "
-            "503 and /health will report unhealthy."
+            "Starting without a usable model for the '%s' mode. Prediction "
+            "endpoints will return 503 and /health will report unhealthy.",
+            ml.default_feature_set(),
         )
     yield
     ml.shutdown()
@@ -141,13 +150,21 @@ def health() -> HealthResponse:
         database = "unavailable"
 
     model_ok = ml.is_ready()
+    versions = ml.model_versions()
+    # A missing non-default mode is reported but does not make the service
+    # unhealthy: the default mode is what the UI uses.
     healthy = database == "ok" and model_ok
     return HealthResponse(
         status="healthy" if healthy else "degraded",
         database=database,
         model="loaded" if model_ok else "unavailable",
         model_version=ml.model_version(),
-        detail=None if healthy else (ml.load_error() or "database unavailable"),
+        model_versions=versions,
+        detail=(
+            ml.load_error()
+            if not healthy
+            else (ml.load_error() or None)
+        ),
     )
 
 
@@ -157,8 +174,10 @@ def root() -> dict:
         "name": "Hemophilia Inhibitor-Risk Research Prototype",
         "docs": "/docs",
         "health": "/health",
+        "dataset": "MMC2 + MMC3 Hemophilia A, joined on mut_id",
+        "target": "Inhibitors (Yes = 1, No = 0)",
         "disclaimer": (
             "Research decision-support prototype. Not clinically validated. "
-            "Estimates are variant-attributable, not patient-level."
+            "Estimates describe a reported record, not an individual patient."
         ),
     }

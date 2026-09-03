@@ -1,4 +1,4 @@
-# Runtime dependencies: FastAPI backend + CHAMP inference + explanations.
+# Runtime dependencies: FastAPI backend + MMC2/MMC3 inference + explanations.
 # Training-only and test-only dependencies live in requirements-dev.txt.
 #
 # scikit-learn is pinned exactly: the serialised artifacts under ml/artifacts/

@@ -10,8 +10,15 @@ Design notes:
   itself, so one account cannot read another's records. That pattern came from
   backend_api.py and is preserved deliberately.
 * No fabricated clinical variables are stored. A patient row holds an
-  identifier and a display name; the clinical signal lives in
-  ``genomic_profiles`` because those are the only fields the model consumes.
+  identifier and a display name; every predictive field lives in
+  ``case_records`` because those are the only fields the model consumes.
+* ``case_records`` stores the submitted features as JSON rather than as fixed
+  columns. The three feature sets take 20, 9 and 29 source columns, and the
+  exact list is decided at training time by what the MMC2/MMC3 files contain —
+  so a fixed-column table would have to be migrated every time a model is
+  retrained. The feature set and model version are stored alongside, and
+  reading a record back goes through the same ml.inference validation that
+  produced it.
 """
 
 from __future__ import annotations
@@ -50,31 +57,30 @@ CREATE TABLE IF NOT EXISTS patients (
     UNIQUE (user_id, identifier)
 );
 
--- The CHAMP-shaped variant record a prediction was made from. Columns mirror
--- ml.preprocessing.champ.FEATURE_COLUMNS exactly.
-CREATE TABLE IF NOT EXISTS genomic_profiles (
-    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_id                  INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    variant_type                TEXT NOT NULL,
-    mechanism                   TEXT NOT NULL,
-    domain                      TEXT NOT NULL,
-    subtype                     TEXT NOT NULL,
-    in_poly_a                   TEXT NOT NULL,
-    reported_clinical_severity  TEXT NOT NULL,
-    exon_number                 REAL,
-    codon_number                REAL,
-    is_intron                   INTEGER NOT NULL DEFAULT 0,
-    created_at                  TEXT NOT NULL DEFAULT (datetime('now'))
+-- The MMC2/MMC3-shaped record a prediction was made from. `features` is the
+-- JSON object that ml.inference validated, keyed by source column name;
+-- `feature_set` says which of genomic / clinical / merged it belongs to.
+-- `mutation_label` is a display convenience only and never reaches the model.
+CREATE TABLE IF NOT EXISTS case_records (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    patient_id     INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    feature_set    TEXT NOT NULL,
+    features       TEXT NOT NULL,
+    mutation_label TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS predictions (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     patient_id            INTEGER NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
-    genomic_profile_id    INTEGER NOT NULL REFERENCES genomic_profiles(id) ON DELETE CASCADE,
+    case_record_id        INTEGER NOT NULL REFERENCES case_records(id) ON DELETE CASCADE,
     probability           REAL NOT NULL,
+    prediction            INTEGER NOT NULL,
+    risk                  TEXT NOT NULL,
     risk_category         TEXT NOT NULL,
     threshold             REAL NOT NULL,
     model_version         TEXT NOT NULL,
+    feature_set           TEXT NOT NULL,
     preprocessing_version TEXT NOT NULL,
     created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -98,10 +104,27 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_patients_user       ON patients(user_id);
-CREATE INDEX IF NOT EXISTS idx_profiles_patient    ON genomic_profiles(patient_id);
+CREATE INDEX IF NOT EXISTS idx_records_patient     ON case_records(patient_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_patient ON predictions(patient_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_explanations_pred   ON explanations(prediction_id);
 """
+
+#: The one feature the analytics page breaks predictions down by. It is the
+#: lowest-cardinality genomic column (Point / Deletion / Insertion / …), so a
+#: count over it is readable; every other column is either near-unique or absent
+#: from most submissions.
+ANALYTICS_BREAKDOWN_COLUMN = "mut_type"
+
+#: Tables belonging to the retired CHAMP feature space. Their columns
+#: (variant_type, mechanism, domain, …) cannot hold an MMC2/MMC3 record, and the
+#: rows in them were produced by a model that is no longer servable. They are
+#: renamed rather than dropped: the data is a user's own history and deleting it
+#: to make room for a new schema is not this migration's call to make.
+LEGACY_CHAMP_TABLES = {
+    "genomic_profiles": "legacy_champ_genomic_profiles",
+    "predictions": "legacy_champ_predictions",
+    "explanations": "legacy_champ_explanations",
+}
 
 _db_path: str = settings.database_path
 
@@ -134,8 +157,59 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 def init_database() -> None:
     with get_connection() as conn:
+        migrate_legacy_champ_tables(conn)
         conn.executescript(SCHEMA)
     logger.info("Database ready at %s", _db_path)
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def migrate_legacy_champ_tables(conn: sqlite3.Connection) -> list[str]:
+    """Move CHAMP-era tables aside so the new schema can be created.
+
+    Detection is by column, not by a version number: a ``genomic_profiles``
+    table is CHAMP-era if it has a ``variant_type`` column, and a
+    ``predictions`` table is if it references ``genomic_profile_id``. Both are
+    renamed with their data intact, together with the explanations that point at
+    them, so a `SELECT * FROM legacy_champ_predictions` still returns every
+    estimate the previous model made.
+
+    Nothing outside those three tables is touched: users and patients carry over
+    unchanged, and their identifiers are unaffected by the rename.
+
+    Returns the tables that were renamed, so the caller can log or assert on it.
+    """
+    existing = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    legacy = (
+        "genomic_profiles" in existing
+        and "variant_type" in _table_columns(conn, "genomic_profiles")
+    ) or (
+        "predictions" in existing
+        and "genomic_profile_id" in _table_columns(conn, "predictions")
+    )
+    if not legacy:
+        return []
+
+    renamed: list[str] = []
+    for old, new in LEGACY_CHAMP_TABLES.items():
+        if old not in existing or new in existing:
+            continue
+        conn.execute(f"ALTER TABLE {old} RENAME TO {new}")
+        renamed.append(old)
+
+    if renamed:
+        logger.warning(
+            "Migrated CHAMP-era tables aside: %s. Their rows were produced by the "
+            "retired champ-v1 model and are preserved read-only under their "
+            "legacy_champ_* names; new predictions use case_records.",
+            ", ".join(renamed),
+        )
+    return renamed
 
 
 def _row(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -210,7 +284,11 @@ def list_patients(user_id: int, limit: int = 100, offset: int = 0) -> list[dict[
                    (SELECT pr.risk_category FROM predictions pr
                      WHERE pr.patient_id = p.id
                      ORDER BY pr.created_at DESC, pr.id DESC LIMIT 1)
-                       AS latest_risk_category
+                       AS latest_risk_category,
+                   (SELECT pr.risk FROM predictions pr
+                     WHERE pr.patient_id = p.id
+                     ORDER BY pr.created_at DESC, pr.id DESC LIMIT 1)
+                       AS latest_risk
               FROM patients p
              WHERE p.user_id = ?
              ORDER BY p.created_at DESC
@@ -240,71 +318,82 @@ def delete_patient(patient_id: int, user_id: int) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Genomic profiles + predictions
+# Case records + predictions
 # --------------------------------------------------------------------------
 
 
-def create_genomic_profile(patient_id: int, features: dict[str, Any]) -> int:
+def create_case_record(
+    patient_id: int,
+    feature_set: str,
+    features: dict[str, Any],
+    mutation_label: str | None = None,
+) -> int:
+    """Store the exact feature dict ml.inference validated.
+
+    The JSON is written verbatim, keys and all, so the record can be replayed
+    through the same validation later — which is how the explanation endpoint
+    rebuilds its input without a second copy of the feature logic.
+    """
     with get_connection() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO genomic_profiles
-                (patient_id, variant_type, mechanism, domain, subtype, in_poly_a,
-                 reported_clinical_severity, exon_number, codon_number, is_intron)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO case_records
+                (patient_id, feature_set, features, mutation_label)
+            VALUES (?,?,?,?)
             """,
-            (
-                patient_id,
-                features["Variant Type"],
-                features["Mechanism"],
-                features["Domain"],
-                features["Subtype"],
-                features["In Poly A"],
-                features["Reported Clinical Severity"],
-                features.get("exon_number"),
-                features.get("codon_number"),
-                int(bool(features.get("is_intron", 0))),
-            ),
+            (patient_id, feature_set, json.dumps(features), mutation_label),
         )
         return int(cursor.lastrowid)
 
 
-def create_prediction(patient_id: int, genomic_profile_id: int,
+def create_prediction(patient_id: int, case_record_id: int,
                       result: dict[str, Any]) -> int:
     with get_connection() as conn:
         cursor = conn.execute(
             """
             INSERT INTO predictions
-                (patient_id, genomic_profile_id, probability, risk_category,
-                 threshold, model_version, preprocessing_version)
-            VALUES (?,?,?,?,?,?,?)
+                (patient_id, case_record_id, probability, prediction, risk,
+                 risk_category, threshold, model_version, feature_set,
+                 preprocessing_version)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 patient_id,
-                genomic_profile_id,
+                case_record_id,
                 result["probability"],
+                int(result["prediction"]),
+                result["risk"],
                 result["risk_category"],
                 result["threshold"],
                 result["model_version"],
+                result["feature_set"],
                 result["preprocessing_version"],
             ),
         )
         return int(cursor.lastrowid)
 
 
+def _with_features(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    """Decode the stored feature JSON into a `features` dict on the row."""
+    if row is None:
+        return None
+    data = dict(row)
+    raw = data.pop("features", None)
+    data["features"] = json.loads(raw) if raw else {}
+    return data
+
+
 def get_prediction(prediction_id: int, user_id: int) -> dict[str, Any] | None:
     """Joined through patients so another user's prediction is simply not found."""
     with get_connection() as conn:
-        return _row(
+        return _with_features(
             conn.execute(
                 """
-                SELECT pr.*, g.variant_type, g.mechanism, g.domain, g.subtype,
-                       g.in_poly_a, g.reported_clinical_severity,
-                       g.exon_number, g.codon_number, g.is_intron,
+                SELECT pr.*, c.features, c.mutation_label,
                        p.display_name AS patient_name
                   FROM predictions pr
-                  JOIN patients p          ON p.id = pr.patient_id
-                  JOIN genomic_profiles g  ON g.id = pr.genomic_profile_id
+                  JOIN patients p      ON p.id = pr.patient_id
+                  JOIN case_records c  ON c.id = pr.case_record_id
                  WHERE pr.id = ? AND p.user_id = ?
                 """,
                 (prediction_id, user_id),
@@ -317,17 +406,17 @@ def list_predictions_for_patient(patient_id: int, user_id: int,
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT pr.*, g.variant_type, g.reported_clinical_severity
+            SELECT pr.*, c.features, c.mutation_label
               FROM predictions pr
-              JOIN patients p         ON p.id = pr.patient_id
-              JOIN genomic_profiles g ON g.id = pr.genomic_profile_id
+              JOIN patients p     ON p.id = pr.patient_id
+              JOIN case_records c ON c.id = pr.case_record_id
              WHERE pr.patient_id = ? AND p.user_id = ?
              ORDER BY pr.created_at DESC, pr.id DESC
              LIMIT ?
             """,
             (patient_id, user_id, limit),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_with_features(r) for r in rows]  # type: ignore[misc]
 
 
 # --------------------------------------------------------------------------
@@ -367,10 +456,11 @@ def analytics_for_user(user_id: int) -> dict[str, Any]:
 
         rows = conn.execute(
             """
-            SELECT pr.risk_category, pr.probability, pr.created_at, g.variant_type
+            SELECT pr.risk_category, pr.probability, pr.created_at,
+                   pr.feature_set, c.features
               FROM predictions pr
-              JOIN patients p         ON p.id = pr.patient_id
-              JOIN genomic_profiles g ON g.id = pr.genomic_profile_id
+              JOIN patients p     ON p.id = pr.patient_id
+              JOIN case_records c ON c.id = pr.case_record_id
              WHERE p.user_id = ?
             """,
             (user_id,),
@@ -378,10 +468,16 @@ def analytics_for_user(user_id: int) -> dict[str, Any]:
 
     probabilities = [r["probability"] for r in rows]
     distribution: dict[str, int] = {}
-    variants: dict[str, int] = {}
+    mutation_types: dict[str, int] = {}
+    feature_sets: dict[str, int] = {}
     for r in rows:
         distribution[r["risk_category"]] = distribution.get(r["risk_category"], 0) + 1
-        variants[r["variant_type"]] = variants.get(r["variant_type"], 0) + 1
+        feature_sets[r["feature_set"]] = feature_sets.get(r["feature_set"], 0) + 1
+        # mut_type is absent from a clinical-only submission; counting it as
+        # "Not supplied" is honest, where defaulting it to a category would not be.
+        features = json.loads(r["features"]) if r["features"] else {}
+        label = str(features.get(ANALYTICS_BREAKDOWN_COLUMN) or "Not supplied")
+        mutation_types[label] = mutation_types.get(label, 0) + 1
 
     return {
         "total_patients": patients,
@@ -390,7 +486,8 @@ def analytics_for_user(user_id: int) -> dict[str, Any]:
             round(sum(probabilities) / len(probabilities), 6) if probabilities else None
         ),
         "risk_distribution": distribution,
-        "variant_type_distribution": variants,
+        "mutation_type_distribution": mutation_types,
+        "feature_set_distribution": feature_sets,
     }
 
 
