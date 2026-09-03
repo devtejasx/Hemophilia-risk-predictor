@@ -1,0 +1,100 @@
+{
+  "generated_by": "scripts/train_inhibitor_model.py",
+  "generated_at": "2026-09-03T10:10:02.088824+00:00",
+  "seed": 42,
+  "feature_set": "genomic",
+  "split": {
+    "strategy": "GroupShuffleSplit on mut_id (80/20, then 80/20 of the remainder)",
+    "seed": 42,
+    "train": 3124,
+    "validation": 812,
+    "test": 1026,
+    "train_positive": 525,
+    "validation_positive": 142,
+    "test_positive": 169,
+    "unique_mutations": 2639,
+    "train_mutations": 1688,
+    "validation_mutations": 423,
+    "test_mutations": 528,
+    "overlaps": {
+      "train_validation": 0,
+      "train_test": 0,
+      "validation_test": 0
+    }
+  },
+  "cross_validation": {
+    "logistic_regression": {
+      "roc_auc_mean": 0.7277483519903974,
+      "roc_auc_std": 0.05513921584286887,
+      "pr_auc_mean": 0.4025743545183773
+    },
+    "random_forest": {
+      "roc_auc_mean": 0.7512202279554806,
+      "roc_auc_std": 0.060943307399919336,
+      "pr_auc_mean": 0.43476360507128825
+    },
+    "xgboost": {
+      "roc_auc_mean": 0.748899009146743,
+      "roc_auc_std": 0.06233278522416987,
+      "pr_auc_mean": 0.4282795669757015
+    },
+    "random_forest_smote": {
+      "roc_auc_mean": 0.7494890587254361,
+      "roc_auc_std": 0.06461429602985899,
+      "pr_auc_mean": 0.44124184673248906
+    }
+  },
+  "selected_model": "random_forest",
+  "threshold": {
+    "value": 0.24643848686665476,
+    "criterion": "max F1 on the validation split"
+  },
+  "validation": {
+    "roc_auc": 0.7209533319318899,
+    "pr_auc": 0.39316501768221296,
+    "brier_score": 0.12991407359890553,
+    "positive_rate": 0.1748768472906404,
+    "at_threshold": {
+      "threshold": 0.24643848686665476,
+      "accuracy": 0.770935960591133,
+      "balanced_accuracy": 0.6697288206853058,
+      "precision": 0.38421052631578945,
+      "recall_sensitivity": 0.5140845070422535,
+      "specificity": 0.8253731343283582,
+      "f1": 0.4397590361445783,
+      "mcc": 0.30457564321175024,
+      "confusion_matrix": {
+        "tn": 553,
+        "fp": 117,
+        "fn": 69,
+        "tp": 73
+      }
+    }
+  },
+  "held_out_test": {
+    "roc_auc": 0.7327266575987517,
+    "pr_auc": 0.3910576067659786,
+    "brier_score": 0.12204397576628533,
+    "positive_rate": 0.16471734892787523,
+    "at_threshold": {
+      "threshold": 0.24643848686665476,
+      "accuracy": 0.7982456140350878,
+      "balanced_accuracy": 0.6797173296141072,
+      "precision": 0.40865384615384615,
+      "recall_sensitivity": 0.5029585798816568,
+      "specificity": 0.8564760793465578,
+      "f1": 0.4509283819628647,
+      "mcc": 0.3316235747489382,
+      "confusion_matrix": {
+        "tn": 734,
+        "fp": 123,
+        "fn": 84,
+        "tp": 85
+      }
+    }
+  },
+  "baselines": {
+    "majority_class_accuracy": 0.8352826510721247,
+    "note": "At a ~17% positive rate a constant 'no inhibitor' answer scores ~0.83 accuracy, which is why accuracy is reported alongside PR-AUC and recall rather than on its own."
+  }
+}

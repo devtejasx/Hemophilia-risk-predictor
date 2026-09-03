@@ -1,13 +1,15 @@
-"""SHAP and LIME correctness — especially that explanations never name a
-feature the caller did not supply."""
+"""SHAP and LIME correctness — especially that an explanation names only the
+model's own MMC2/MMC3 columns, never a CHAMP-era one, and never implies the
+caller entered a value they left blank."""
 
 from __future__ import annotations
 
 import pytest
 
 from ml.explainability.service import ExplanationService
-from ml.preprocessing import champ
-from tests.conftest import requires_model
+from ml.inference import FEATURE_LABELS, service_for_feature_set
+from ml.preprocessing import hemophilia_a as ha
+from tests.conftest import requires_all_models, requires_model
 
 pytestmark = requires_model
 
@@ -27,21 +29,50 @@ def test_both_methods_are_available(explanation):
     assert explanation["lime"]["available"], explanation["lime"].get("reason")
 
 
-def test_explanation_states_it_is_variant_level(explanation):
-    assert "variant" in explanation["unit_of_explanation"].lower()
-    assert "not an individual patient" in explanation["unit_of_explanation"]
+def test_explanation_states_its_unit_and_feature_set(explanation):
+    assert explanation["feature_set"] == "merged"
+    unit = explanation["unit_of_explanation"]
+    assert "clinical record" in unit
+    assert "not an individual patient" in unit
 
 
 @pytest.mark.parametrize("method", ["shap", "lime"])
-def test_contributions_only_name_supplied_champ_columns(
-    explanation, valid_payload, method
+def test_contributions_only_name_the_models_own_source_columns(
+    explanation, service, method
 ):
-    """No post-encoding names like 'cat__Variant Type_Missense', and nothing the
-    caller never provided."""
+    """No post-encoding names like 'cat__mut_type_Point', and nothing outside the
+    feature set this model was fitted on."""
     for item in explanation[method]["contributions"]:
-        assert item["feature"] in champ.FEATURE_COLUMNS
-        assert not item["feature"].startswith(("cat__", "num__", "bin__"))
-        assert item["feature"] in valid_payload
+        assert item["feature"] in service.spec.columns
+        assert not item["feature"].startswith(("cat__", "num__"))
+
+
+@pytest.mark.parametrize("method", ["shap", "lime"])
+def test_contributions_never_name_a_champ_column(explanation, method):
+    """The old feature space must not survive anywhere in an explanation."""
+    retired = {
+        "Variant Type",
+        "Mechanism",
+        "Domain",
+        "Subtype",
+        "In Poly A",
+        "Reported Clinical Severity",
+        "exon_number",
+        "codon_number",
+        "is_intron",
+    }
+    for item in explanation[method]["contributions"]:
+        assert item["feature"] not in retired
+        assert item["feature"] in set(ha.GENOMIC_CANDIDATES) | set(
+            ha.CLINICAL_CANDIDATES
+        )
+
+
+@pytest.mark.parametrize("method", ["shap", "lime"])
+def test_contributions_carry_a_human_readable_label(explanation, method):
+    for item in explanation[method]["contributions"]:
+        assert item["label"]
+        assert item["label"] == FEATURE_LABELS[item["feature"]]["label"]
 
 
 @pytest.mark.parametrize("method", ["shap", "lime"])
@@ -49,7 +80,19 @@ def test_contributions_report_the_value_actually_supplied(
     explanation, valid_payload, method
 ):
     for item in explanation[method]["contributions"]:
-        assert item["value"] == valid_payload[item["feature"]]
+        assert item["value"] == valid_payload.get(item["feature"])
+
+
+@pytest.mark.parametrize("method", ["shap", "lime"])
+def test_an_omitted_field_is_flagged_rather_than_given_a_value(
+    explanation, valid_payload, method
+):
+    """A blank optional field still reaches the model as an explicit Unknown, so
+    it may legitimately appear — but never as if the caller had entered it."""
+    for item in explanation[method]["contributions"]:
+        assert item["supplied"] == (item["feature"] in valid_payload)
+        if not item["supplied"]:
+            assert item["value"] is None
 
 
 @pytest.mark.parametrize("method", ["shap", "lime"])
@@ -75,11 +118,18 @@ def test_contributions_are_ranked_by_absolute_effect(explanation, method):
 
 
 def test_no_duplicate_features_after_aggregation(explanation):
-    """One categorical expands to many one-hot columns; they must be summed back
-    onto a single row, not listed separately."""
+    """One categorical expands to hundreds of one-hot columns; they must be
+    summed back onto a single row, not listed separately."""
     for method in ("shap", "lime"):
         names = [c["feature"] for c in explanation[method]["contributions"]]
         assert len(names) == len(set(names))
+
+
+def test_shap_uses_the_fast_tree_path_over_the_boosted_model(explainer):
+    """The merged model is an XGBClassifier under an isotonic calibrator. If the
+    tree path stops recognising it, explanations fall back to a model-agnostic
+    explainer that is far too slow for a request."""
+    assert explainer._base_tree_estimators()
 
 
 def test_shap_declares_the_basis_of_its_attribution(explanation):
@@ -105,15 +155,21 @@ def test_single_method_can_be_requested(explainer, service, valid_payload):
     assert "shap" in out and "lime" not in out
 
 
-def test_global_importance_ranks_known_drivers_highly(explainer):
-    result = explainer.global_importance(top_n=9)
+def test_global_importance_names_only_the_models_own_features(explainer, service):
+    result = explainer.global_importance(top_n=12)
     assert result["available"], result.get("reason")
+    assert result["feature_set"] == "merged"
     features = [f["feature"] for f in result["features"]]
-    assert set(features) <= set(champ.FEATURE_COLUMNS)
-    # Variant Type and reported severity dominate the crosstabs; they should not
-    # rank below the near-constant In Poly A flag.
-    assert features.index("Variant Type") < features.index("In Poly A")
-    assert features.index("Reported Clinical Severity") < features.index("In Poly A")
+    assert set(features) <= set(service.spec.columns)
+    assert all(f["label"] for f in result["features"])
+
+
+def test_global_importance_ranks_a_real_driver_above_a_near_empty_column(explainer):
+    """cli_phe (clinical severity, 1% missing) should outrank assay, which is
+    99.5% missing and carries almost nothing."""
+    result = explainer.global_importance(top_n=30)
+    ranking = [f["feature"] for f in result["features"]]
+    assert ranking.index("cli_phe") < ranking.index("assay")
 
 
 def test_importances_are_non_negative(explainer):
@@ -121,18 +177,34 @@ def test_importances_are_non_negative(explainer):
         assert item["importance"] >= 0
 
 
-def test_explanation_reports_failure_instead_of_inventing_values(service, monkeypatch):
+@requires_all_models
+def test_a_genomic_explanation_never_mentions_a_clinical_feature():
+    svc = service_for_feature_set("genomic")
+    schema = svc.input_schema()
+    payload = {
+        column: (
+            schema["categorical"][column][0]
+            if column in schema["categorical"]
+            else 1000.0
+        )
+        for column in schema["required"]
+    }
+    out = ExplanationService(svc.bundle).explain(svc.transform(payload), payload)
+    for method in ("shap", "lime"):
+        for item in out[method]["contributions"]:
+            assert item["feature"] not in ha.CLINICAL_CANDIDATES
+
+
+def test_explanation_reports_failure_instead_of_inventing_values(
+    service, valid_payload, monkeypatch
+):
     """A broken explainer must say it is unavailable, never fall back to
     something that looks like a real attribution."""
     ex = ExplanationService(service.bundle)
     monkeypatch.setattr(
         ex, "_get_shap", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
     )
-    result = ex._explain_shap(service.transform({
-        "Variant Type": "Missense", "Mechanism": "Substitution", "Domain": "A2",
-        "Subtype": "Heavy chain", "In Poly A": "N",
-        "Reported Clinical Severity": "Mild",
-    }), {}, 5)
+    result = ex._explain_shap(service.transform(valid_payload), valid_payload, 5)
     assert result["available"] is False
     assert "boom" in result["reason"]
     assert "contributions" not in result

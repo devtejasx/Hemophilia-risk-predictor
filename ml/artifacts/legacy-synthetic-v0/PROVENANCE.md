@@ -1,6 +1,7 @@
 # legacy-synthetic-v0 — provenance
 
-**These artifacts were not trained on CHAMP. Do not quote metrics from them.**
+**These artifacts were trained on 30 fabricated rows, not on any real dataset.
+Do not quote metrics from them.**
 
 They are preserved here byte-for-byte for provenance and comparison only. They are
 never the default model and are never loaded unless a caller explicitly asks for
@@ -13,7 +14,7 @@ version `legacy-synthetic-v0`.
 via `archive/legacy-ml/data_fusion.py`.
 
 Those two files are **30 hand-written rows**. They are not clinical data, not a
-sample of CHAMP, and not derived from any patient record.
+sample of any registry, and not derived from any patient record.
 
 ## Why the metrics are meaningless
 
@@ -45,10 +46,11 @@ was ever written.
 
 ## Feature space
 
-The 20 features are **not CHAMP fields**. Four of them — `age_first_treatment`,
-`dose_intensity`, `exposure_days`, `cumulative_exposure` — have no counterpart in
-`champ.csv` at all. This is why these artifacts cannot serve the CHAMP pipeline and
-why `champ-v1` exists alongside them rather than replacing them.
+The 20 features are **not fields of any supplied dataset**. Four of them —
+`age_first_treatment`, `dose_intensity`, `exposure_days`, `cumulative_exposure` —
+have no counterpart in MMC2 or MMC3 at all. This is why these artifacts cannot
+serve the current pipeline and why the `mmc-*-v1` versions exist alongside them
+rather than replacing them.
 
 ```
 exon, age_first_treatment, dose_intensity, exposure_days, mutation_code,

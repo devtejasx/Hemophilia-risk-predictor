@@ -1,0 +1,210 @@
+{
+  "generated_at": "2026-09-03T10:11:32.811156+00:00",
+  "dataset": {
+    "name": "MMC2+MMC3",
+    "description": "Hemophilia A supplementary tables MMC2 (mutations) and MMC3 (clinical records), joined on mut_id.",
+    "files": {
+      "mmc2": {
+        "path": "ml\\data\\BVTH_VTH-2024-000215-mmc2.csv",
+        "sha256": "d64fbd90654d329a15a7fc2dc942536f1468b4a0b031b3d2854c79916e45b75d"
+      },
+      "mmc3": {
+        "path": "ml\\data\\BVTH_VTH-2024-000215-mmc3.csv",
+        "sha256": "f6bb8b1e6e867292fca185580f0d7db0ce5596e03089a7c8d4500b0bd89431fa"
+      }
+    },
+    "join": {
+      "key": "mut_id",
+      "how": "inner",
+      "genomic_rows_per_mutation": 1
+    },
+    "unit_of_observation": "one clinical record of one F8 mutation",
+    "group_key": "mut_id",
+    "label_column": "Inhibitors",
+    "labels": {
+      "n_total": 10064,
+      "n_labelled": 4966,
+      "n_positive": 836,
+      "positive_rate": 0.168345,
+      "n_excluded_unlabelled": 5098,
+      "excluded_values": {
+        "not reported": 2090,
+        "(missing)": 1730,
+        "not": 1276,
+        "severe": 1,
+        "mild": 1
+      },
+      "encoding": "Inhibitors: Yes -> 1, No -> 0 (case- and space-insensitive)",
+      "caveat": "Records without an explicit Yes/No inhibitor value are excluded, never imputed. That exclusion is unlikely to be random, so the positive rate describes the reported subset of this dataset, not population incidence."
+    },
+    "merge": {
+      "n_mmc2_rows": 6211,
+      "n_mmc2_f8_rows": 6205,
+      "n_mmc3_rows": 10064,
+      "n_mmc3_labelled": 4966,
+      "n_merged_rows": 4962,
+      "n_unique_mut_id": 2639,
+      "n_duplicate_rows": 0,
+      "n_unmatched_clinical": 4,
+      "n_conflicting_label_groups": 124,
+      "records_per_mutation_max": 104,
+      "target_distribution": {
+        "0": 4126,
+        "1": 836
+      },
+      "case_collapses": {
+        "mut_effect": {
+          "missense": "Missense",
+          "MIssense": "Missense",
+          "Large deletion": "Large Deletion",
+          "large Deletion": "Large Deletion"
+        },
+        "location": {
+          "exon": "Exon"
+        },
+        "codon_change": {
+          "TGg TGa": "TGG TGA",
+          "Ggt Gtt": "GGT GTT",
+          "agt aat": "AGT AAT",
+          "Agt Aat": "AGT AAT",
+          "agc agg": "AGC AGG"
+        },
+        "aa_change": {
+          "TYr *": "Tyr *",
+          "tyr *": "Tyr *",
+          "Val leu": "Val Leu"
+        },
+        "aa_first": {
+          "tyr": "Tyr"
+        },
+        "clotting": {
+          "Not Reported": "Not reported"
+        },
+        "cli_phe": {
+          "severe": "Severe",
+          "MIld": "Mild",
+          "Moderate/severe": "Moderate/Severe"
+        }
+      }
+    },
+    "leakage_probe": {
+      "mut_syn": 0.16166026199611486,
+      "uinhibitor": 0.15481034211143574,
+      "nuc_numb": 0.1513514509683625,
+      "aa_syn": 0.14869802376231953,
+      "aa_numb_old": 0.14578210688958282,
+      "aa_numb": 0.13232560341155059,
+      "aa_change": 0.11324520977049286,
+      "codon_change": 0.1042106976131281,
+      "aa_last": 0.10283475640749377,
+      "mut_effect": 0.09389665861028272,
+      "cli_phe": 0.0887693050534191,
+      "codon_last": 0.08596618425412304,
+      "clotting": 0.07527386370849154,
+      "pa_race": 0.07119017460377625,
+      "codon_first": 0.07060361802050547,
+      "mut_type": 0.06271628888526384,
+      "ntchange": 0.06215894020361197,
+      "locnumb": 0.05300371600319691,
+      "CpG": 0.05019624356719288,
+      "ratio": 0.05007854786660624,
+      "e_i_numb": 0.04794017411048264,
+      "aa_first": 0.04731904326302064,
+      "n_bp": 0.0460770615773623,
+      "type": 0.02211623903041872,
+      "utype": 0.02030132757445096,
+      "antigen": 0.015389805158800798,
+      "act/ant": 0.010122533302630318,
+      "location": 0.0006038617828560927,
+      "discrep": 0.0005193456882164604,
+      "assay": 0.0004889113698151905
+    }
+  },
+  "split": {
+    "strategy": "GroupShuffleSplit on mut_id (80/20, then 80/20 of the remainder)",
+    "seed": 42,
+    "train": 3124,
+    "validation": 812,
+    "test": 1026,
+    "train_positive": 525,
+    "validation_positive": 142,
+    "test_positive": 169,
+    "unique_mutations": 2639,
+    "train_mutations": 1688,
+    "validation_mutations": 423,
+    "test_mutations": 528,
+    "overlaps": {
+      "train_validation": 0,
+      "train_test": 0,
+      "validation_test": 0
+    }
+  },
+  "models": {
+    "mmc-genomic-v1": {
+      "roc_auc": 0.7327266575987517,
+      "pr_auc": 0.3910576067659786,
+      "brier_score": 0.12204397576628533,
+      "positive_rate": 0.16471734892787523,
+      "at_threshold": {
+        "threshold": 0.24643848686665476,
+        "accuracy": 0.7982456140350878,
+        "balanced_accuracy": 0.6797173296141072,
+        "precision": 0.40865384615384615,
+        "recall_sensitivity": 0.5029585798816568,
+        "specificity": 0.8564760793465578,
+        "f1": 0.4509283819628647,
+        "mcc": 0.3316235747489382,
+        "confusion_matrix": {
+          "tn": 734,
+          "fp": 123,
+          "fn": 84,
+          "tp": 85
+        }
+      }
+    },
+    "mmc-clinical-v1": {
+      "roc_auc": 0.7156276539186511,
+      "pr_auc": 0.4144413904424167,
+      "brier_score": 0.11815993583321234,
+      "positive_rate": 0.16471734892787523,
+      "at_threshold": {
+        "threshold": 0.2800483519175986,
+        "accuracy": 0.8265107212475633,
+        "balanced_accuracy": 0.6135065903488846,
+        "precision": 0.45871559633027525,
+        "recall_sensitivity": 0.2958579881656805,
+        "specificity": 0.9311551925320887,
+        "f1": 0.3597122302158273,
+        "mcc": 0.2732668308068225,
+        "confusion_matrix": {
+          "tn": 798,
+          "fp": 59,
+          "fn": 119,
+          "tp": 50
+        }
+      }
+    },
+    "mmc-merged-v1": {
+      "roc_auc": 0.764587490420001,
+      "pr_auc": 0.47539348331675346,
+      "brier_score": 0.11256631234713578,
+      "positive_rate": 0.16471734892787523,
+      "at_threshold": {
+        "threshold": 0.24532813727855682,
+        "accuracy": 0.8011695906432749,
+        "balanced_accuracy": 0.7075942637382364,
+        "precision": 0.42290748898678415,
+        "recall_sensitivity": 0.5680473372781065,
+        "specificity": 0.8471411901983664,
+        "f1": 0.48484848484848486,
+        "mcc": 0.37101612871499506,
+        "confusion_matrix": {
+          "tn": 726,
+          "fp": 131,
+          "fn": 73,
+          "tp": 96
+        }
+      }
+    }
+  }
+}

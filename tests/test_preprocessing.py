@@ -1,154 +1,92 @@
-"""CHAMP data integrity and preprocessing correctness.
+"""Feature resolution, the fitted transformer, and the grouped split.
 
-Several of these encode specific defects found in the Phase 0 audit, so a
-regression would fail the suite rather than being rediscovered later.
+Several of these encode specific defects the pipeline is designed to avoid, so a
+regression fails the suite rather than being rediscovered later.
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
-from ml.preprocessing import champ
+from ml.preprocessing import hemophilia_a as ha
+from tests.conftest import requires_model
 
 
 @pytest.fixture(scope="module")
-def raw():
-    return champ.load_champ()
+def merged():
+    frame, _, _, _ = ha.load_merged()
+    return frame
 
 
 @pytest.fixture(scope="module")
-def prepared():
-    return champ.load_champ_features()
+def specs(merged):
+    return ha.build_feature_specs(merged)
 
 
 # --------------------------------------------------------------------------
-# Dataset integrity
+# Feature resolution
 # --------------------------------------------------------------------------
 
 
-def test_champ_file_loads_with_expected_shape(raw):
-    assert len(raw) == 4050
-    # The 10 trailing all-empty "Unnamed:" columns are dropped on load.
-    assert not [c for c in raw.columns if c.startswith("Unnamed:")]
+def test_the_three_feature_sets_exist(specs):
+    assert set(specs) == set(ha.FEATURE_SET_NAMES)
 
 
-def test_validation_passes_on_the_shipped_dataset(raw):
-    report = champ.validate_champ(raw)
-    assert report.ok
-    assert report.missing_columns == []
+def test_genomic_and_clinical_features_come_from_the_right_table(specs):
+    assert set(specs["genomic"].columns) <= set(ha.GENOMIC_CANDIDATES)
+    assert set(specs["clinical"].columns) <= set(ha.CLINICAL_CANDIDATES)
+    assert not set(specs["genomic"].columns) & set(specs["clinical"].columns)
 
 
-def test_validation_reports_missing_columns():
-    report = champ.validate_champ(pd.DataFrame({"Variant Type": ["Missense"]}))
-    assert not report.ok
-    assert champ.LABEL_COLUMN in report.missing_columns
-    with pytest.raises(ValueError, match="missing required columns"):
-        report.raise_if_invalid()
-
-
-def test_label_counts_match_the_audit(prepared):
-    _, y, labels, _ = prepared
-    assert labels.n_labelled == 2296
-    assert labels.n_positive == 461
-    assert y.sum() == 461
-    assert labels.positive_rate == pytest.approx(0.2008, abs=1e-4)
-
-
-def test_every_row_is_accounted_for(prepared):
-    """No record may be dropped without appearing in the exclusion report."""
-    _, _, labels, _ = prepared
-    assert labels.n_labelled + labels.n_excluded_unlabelled == labels.n_total
-    assert sum(labels.excluded_values.values()) == labels.n_excluded_unlabelled
-    # The 12 blank labels must be named, not silently swallowed.
-    assert labels.excluded_values["(missing)"] == 12
-    assert labels.excluded_values["not reported"] == 1742
-
-
-def test_no_duplicate_variants_among_labelled_rows(raw):
-    normalised = raw[champ.LABEL_COLUMN].astype(str).str.strip().str.lower()
-    labelled = raw[normalised.isin({"yes", "no"})]
-    assert labelled["HGVS cDNA"].duplicated().sum() == 0
-
-
-# --------------------------------------------------------------------------
-# Normalisation
-# --------------------------------------------------------------------------
-
-
-def test_domain_acidic_regions_are_not_merged_into_a_domains(prepared):
-    """a1/a2/a3 are the acidic regions and are biologically distinct from the
-    A1/A2/A3 domains. Case-folding this column would corrupt 96 rows."""
-    X, _, _, _ = prepared
-    domains = set(X["Domain"].dropna().unique())
-    for lower, upper in (("a1", "A1"), ("a2", "A2"), ("a3", "A3")):
-        assert lower in domains, f"{lower} was merged away"
-        assert upper in domains
-    assert "Domain" not in champ._CASE_INSENSITIVE_COLUMNS
-
-
-def test_case_typos_are_normalised(prepared):
-    X, _, _, _ = prepared
-    mechanisms = set(X["Mechanism"].dropna().unique())
-    assert "deletion" not in mechanisms and "DuplIcation" not in mechanisms
-    assert "Deletion" in mechanisms and "Duplication" in mechanisms
-
-    severities = set(X["Reported Clinical Severity"].dropna().unique())
-    assert "severe" not in severities and "Not Reported" not in severities
-
-    assert set(X["In Poly A"].dropna().unique()) <= {"N", "Y"}
-
-
-def test_exon_column_splits_into_number_and_intron_flag(prepared):
-    """The legacy pipeline tested `isinstance(x, str)` on an int column, making
-    its exon_risk feature constant. Exon is genuinely mixed: '14' and 'Intron 22'."""
-    X, _, _, _ = prepared
-    assert X["is_intron"].sum() == 187
-    assert X["is_intron"].nunique() == 2, "is_intron must not be constant"
-    assert X["exon_number"].nunique() > 20
-
-
-@pytest.mark.parametrize(
-    "value,expected",
-    [("14", (14.0, 0)), ("Intron 22", (22.0, 1)), ("intron 4", (4.0, 1)), (None, None)],
-)
-def test_parse_exon(value, expected):
-    number, is_intron = champ._parse_exon(value)
-    if expected is None:
-        assert np.isnan(number) and is_intron == 0
-    else:
-        assert (number, is_intron) == expected
-
-
-def test_normalisation_never_changes_row_count_or_labels(raw):
-    out = champ.normalise_champ(raw)
-    assert len(out) == len(raw)
-    pd.testing.assert_series_equal(
-        out[champ.LABEL_COLUMN], raw[champ.LABEL_COLUMN], check_names=False
+def test_merged_is_the_union_of_the_other_two(specs):
+    assert set(specs["merged"].columns) == set(specs["genomic"].columns) | set(
+        specs["clinical"].columns
     )
 
 
-# --------------------------------------------------------------------------
-# Leakage guards
-# --------------------------------------------------------------------------
+def test_resolved_feature_counts(specs):
+    assert len(specs["genomic"].columns) == 20
+    assert len(specs["clinical"].columns) == 9
+    assert len(specs["merged"].columns) == 29
 
 
-def test_reference_number_is_never_a_feature():
-    """Source publication leaks the label: some studies are 100% positive."""
-    assert "Reference Number" not in champ.FEATURE_COLUMNS
-    assert "Reference Number" in champ.EXCLUDED_COLUMNS
-    assert "LEAKAGE" in champ.EXCLUDED_COLUMNS["Reference Number"]
+def test_candidates_absent_from_the_data_are_dropped_not_invented(specs, merged):
+    """`mutations` is in both tables, so the join suffixes it and neither
+    `mutations_clinical` nor `mutations_genomic` is the candidate column."""
+    assert "mutations" in specs["genomic"].dropped
+    assert "mutations" not in merged.columns
+    assert "mutations_genomic" in merged.columns
 
 
-def test_identifier_columns_are_never_features():
-    for col in ("HGVS cDNA", "hg19 Coordinates", "HGVS Protein", "Mature Protein"):
-        assert col not in champ.FEATURE_COLUMNS
-        assert col in champ.EXCLUDED_COLUMNS
+def test_all_null_candidates_are_dropped(specs, merged):
+    for column in ("bleed_tool", "bleed_score"):
+        assert column in specs["clinical"].dropped
+        assert merged[column].isna().all()
 
 
-def test_label_column_is_not_among_the_features():
-    assert champ.LABEL_COLUMN not in champ.FEATURE_COLUMNS
+def test_every_resolved_feature_exists_and_varies(specs, merged):
+    for spec in specs.values():
+        for column in spec.columns:
+            assert column in merged.columns, column
+            assert merged[column].nunique(dropna=False) > 1, column
+
+
+def test_numeric_and_categorical_partition_the_columns(specs):
+    for spec in specs.values():
+        assert set(spec.categorical) | set(spec.numeric) == set(spec.columns)
+        assert not set(spec.categorical) & set(spec.numeric)
+
+
+def test_required_columns_are_the_ones_that_are_nearly_always_present(specs, merged):
+    for spec in specs.values():
+        for column in spec.required:
+            assert merged[column].isna().mean() <= ha.REQUIRED_MAX_MISSING_RATE
+
+
+def test_feature_spec_round_trips_through_metadata(specs):
+    for spec in specs.values():
+        assert ha.FeatureSpec.from_dict(spec.as_dict()) == spec
 
 
 # --------------------------------------------------------------------------
@@ -156,60 +94,182 @@ def test_label_column_is_not_among_the_features():
 # --------------------------------------------------------------------------
 
 
-def test_preprocessor_output_has_no_missing_values(prepared):
-    X, _, _, _ = prepared
-    matrix = champ.build_preprocessor().fit_transform(X)
+@pytest.fixture(scope="module")
+def fitted(merged, specs):
+    spec = specs["merged"]
+    pre = ha.build_preprocessor(spec).fit(merged[spec.columns])
+    return spec, pre
+
+
+def test_preprocessor_output_has_no_missing_values(fitted, merged):
+    spec, pre = fitted
+    matrix = pre.transform(merged[spec.columns])
     assert not np.isnan(matrix).any()
-    assert matrix.shape[0] == len(X)
+    assert matrix.shape[0] == len(merged)
 
 
-def test_missing_categoricals_become_an_explicit_unknown_category(prepared):
+def test_missing_categoricals_become_an_explicit_unknown_level(fitted):
     """SimpleImputer does not treat Python None as missing on object arrays, so
-    nulls previously became a literal 'None' category."""
-    X, _, _, _ = prepared
-    pre = champ.build_preprocessor().fit(X)
-    names = champ.encoded_feature_names(pre)
-    assert any(n.endswith(f"_{champ.MISSING_CATEGORY}") for n in names)
+    nulls would otherwise become a literal 'None' category."""
+    _, pre = fitted
+    names = ha.encoded_feature_names(pre)
+    assert any(n.endswith(f"_{ha.MISSING_CATEGORY}") for n in names)
     assert not any(n.endswith("_None") for n in names)
 
 
-def test_feature_order_is_stable_across_transforms(prepared):
-    X, _, _, _ = prepared
-    pre = champ.build_preprocessor().fit(X)
-    first = champ.encoded_feature_names(pre)
-    second = champ.encoded_feature_names(pre)
-    assert first == second
-    assert len(first) == pre.transform(X.head(5)).shape[1]
+def test_numeric_missingness_is_recorded_not_hidden(fitted):
+    """An imputed median must stay distinguishable from an observed one."""
+    _, pre = fitted
+    names = ha.encoded_feature_names(pre)
+    assert any("missingindicator_" in n for n in names)
 
 
-def test_transform_is_row_order_independent(prepared):
+def test_feature_order_is_stable_across_transforms(fitted, merged):
+    spec, pre = fitted
+    first = ha.encoded_feature_names(pre)
+    assert first == ha.encoded_feature_names(pre)
+    assert len(first) == pre.transform(merged[spec.columns].head(5)).shape[1]
+
+
+def test_transform_is_row_order_independent(fitted, merged):
     """One row transformed alone must equal that row inside a batch — the
     property the serving path depends on."""
-    X, _, _, _ = prepared
-    pre = champ.build_preprocessor().fit(X)
-    batch = pre.transform(X.head(10))
-    single = pre.transform(X.iloc[[3]])
+    spec, pre = fitted
+    frame = merged[spec.columns]
+    batch = pre.transform(frame.head(10))
+    single = pre.transform(frame.iloc[[3]])
     np.testing.assert_allclose(single[0], batch[3])
 
 
-def test_encoded_names_map_back_to_source_champ_columns(prepared):
-    X, _, _, _ = prepared
-    pre = champ.build_preprocessor().fit(X)
-    known = set(champ.FEATURE_COLUMNS)
-    for name in champ.encoded_feature_names(pre):
-        assert champ.source_column_for(name) in known, name
+def test_encoded_names_map_back_to_source_columns(fitted):
+    spec, pre = fitted
+    known = set(spec.columns)
+    for name in ha.encoded_feature_names(pre):
+        assert spec.source_column_for(name) in known, name
 
 
-def test_category_value_extraction():
-    assert champ.source_column_for("cat__Variant Type_Missense") == "Variant Type"
-    assert champ.category_value_for("cat__Variant Type_Missense") == "Missense"
-    assert champ.category_value_for("num__exon_number") is None
+def test_source_column_mapping_prefers_the_longest_match(specs):
+    spec = specs["merged"]
+    # aa_numb and aa_numb_old share a prefix; a naive scan would mis-attribute.
+    assert spec.source_column_for("num__aa_numb_old") == "aa_numb_old"
+    assert spec.source_column_for("num__aa_numb") == "aa_numb"
+    assert spec.source_column_for("cat__mut_type_Point") == "mut_type"
+    assert spec.category_value_for("cat__mut_type_Point") == "Point"
+    assert spec.category_value_for("num__aa_numb") is None
 
 
-def test_fitted_categories_exposes_the_training_vocabulary(prepared):
-    X, _, _, _ = prepared
-    pre = champ.build_preprocessor().fit(X)
-    categories = champ.fitted_categories(pre)
-    assert set(categories) == set(champ.CATEGORICAL_FEATURES)
-    assert "Missense" in categories["Variant Type"]
-    assert "a1" in categories["Domain"] and "A1" in categories["Domain"]
+def test_fitted_categories_expose_the_training_vocabulary(fitted):
+    spec, pre = fitted
+    categories = ha.fitted_categories(pre, spec)
+    assert set(categories) == set(spec.categorical)
+    assert "Point" in categories["mut_type"]
+    assert "Severe" in categories["cli_phe"]
+
+
+def test_offered_categories_exclude_the_infrequent_bucket(fitted):
+    spec, pre = fitted
+    seen = ha.fitted_categories(pre, spec)
+    offered = ha.frequent_categories(pre, spec)
+    for column in spec.categorical:
+        assert set(offered[column]) <= set(seen[column])
+    # mut_syn is a near-identifier: most of its values are folded away.
+    assert len(offered["mut_syn"]) < len(seen["mut_syn"])
+
+
+def test_open_vocabulary_columns_are_the_identifier_like_ones(fitted):
+    spec, pre = fitted
+    open_columns = ha.open_vocabulary_columns(pre, spec)
+    assert {"mut_syn", "aa_syn", "nuc_numb", "clotting"} <= open_columns
+    assert not {"mut_type", "location", "cli_phe", "CpG"} & open_columns
+
+
+def test_a_feature_set_with_no_columns_is_refused():
+    empty = ha.FeatureSpec(name="empty", categorical=(), numeric=())
+    with pytest.raises(ValueError, match="no usable columns"):
+        ha.build_preprocessor(empty)
+
+
+# --------------------------------------------------------------------------
+# Grouped split (leakage)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def split(merged):
+    from scripts.train_inhibitor_model import grouped_split
+
+    return grouped_split(merged, seed=42, test_size=0.20, val_size=0.20)
+
+
+def test_grouped_split_covers_every_row_exactly_once(merged, split):
+    train, val, test = split
+    assert len(train) + len(val) + len(test) == len(merged)
+    assert len(set(train) | set(val) | set(test)) == len(merged)
+
+
+def test_no_mutation_appears_in_two_splits(merged, split):
+    train, val, test = split
+    groups = merged[ha.GROUP_COLUMN]
+    gt, gv, gs = set(groups.iloc[train]), set(groups.iloc[val]), set(groups.iloc[test])
+    assert gt.isdisjoint(gv)
+    assert gt.isdisjoint(gs)
+    assert gv.isdisjoint(gs)
+    assert len(gt) + len(gv) + len(gs) == groups.nunique()
+
+
+def test_leakage_assertion_rejects_an_overlapping_split(merged, split):
+    from scripts.train_inhibitor_model import assert_no_group_overlap
+
+    train, val, test = split
+    assert_no_group_overlap(merged, train, val, test)  # the real split is clean
+    with pytest.raises(RuntimeError, match="Group leakage"):
+        assert_no_group_overlap(merged, train, val, np.concatenate([test, train[:5]]))
+
+
+def test_a_random_row_split_would_have_leaked(merged):
+    """The reason the split is grouped: a plain shuffle puts records of the same
+    mutation on both sides."""
+    from sklearn.model_selection import train_test_split
+
+    train, test = train_test_split(
+        np.arange(len(merged)), test_size=0.2, random_state=42
+    )
+    groups = merged[ha.GROUP_COLUMN]
+    assert set(groups.iloc[train]) & set(groups.iloc[test])
+
+
+def test_every_split_contains_both_classes(merged, split):
+    y = merged[ha.TARGET_COLUMN]
+    for part in split:
+        assert set(y.iloc[part].unique()) == {0, 1}
+
+
+# --------------------------------------------------------------------------
+# Train / inference agreement
+# --------------------------------------------------------------------------
+
+
+@requires_model
+def test_the_served_preprocessor_matches_its_recorded_feature_space(service):
+    """The artifact's metadata, its preprocessor and its estimator must agree."""
+    encoded = ha.encoded_feature_names(service.bundle.preprocessor)
+    assert encoded == service.bundle.feature_names
+    assert service.bundle.model.n_features_in_ == len(encoded)
+
+
+@requires_model
+def test_inference_columns_are_exactly_the_training_columns(service):
+    frame = service.validate(_minimal_payload(service))
+    assert list(frame.columns) == service.spec.columns
+
+
+def _minimal_payload(service) -> dict:
+    schema = service.input_schema()
+    payload = {}
+    for column in schema["required"]:
+        payload[column] = (
+            schema["categorical"][column][0]
+            if column in schema["categorical"]
+            else 1000.0
+        )
+    return payload

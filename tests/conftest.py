@@ -12,13 +12,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ml.artifacts import available_versions  # noqa: E402
-from ml.inference import PredictionService  # noqa: E402
+from ml.inference import FEATURE_SET_VERSIONS, PredictionService  # noqa: E402
 
-MODEL_VERSION = "champ-v1"
+MODEL_VERSION = "mmc-merged-v1"
 
 requires_model = pytest.mark.skipif(
     MODEL_VERSION not in available_versions(),
-    reason=f"{MODEL_VERSION} not built; run scripts/train_champ.py",
+    reason=f"{MODEL_VERSION} not built; run scripts/train_inhibitor_model.py",
+)
+
+requires_all_models = pytest.mark.skipif(
+    not set(FEATURE_SET_VERSIONS.values()) <= set(available_versions()),
+    reason="not all feature-set models are built; run scripts/train_inhibitor_model.py",
 )
 
 
@@ -28,16 +33,19 @@ def service() -> PredictionService:
 
 
 @pytest.fixture(scope="session")
-def valid_payload() -> dict:
-    """A CHAMP-compatible input using only categories present in the registry."""
-    return {
-        "Variant Type": "Missense",
-        "Mechanism": "Substitution",
-        "Domain": "A2",
-        "Subtype": "Heavy chain",
-        "In Poly A": "N",
-        "Reported Clinical Severity": "Severe",
-        "exon_number": 14,
-        "codon_number": 1200,
-        "is_intron": 0,
-    }
+def valid_payload(service: PredictionService) -> dict:
+    """A merged-block input using only values the model was fitted on.
+
+    Built from the served model's own vocabulary rather than hand-written, so it
+    cannot drift away from what the artifact accepts. Every required column is
+    filled; optional ones are deliberately left out to exercise the
+    explicit-missing path.
+    """
+    payload: dict = {}
+    schema = service.input_schema()
+    for column in schema["required"]:
+        if column in schema["categorical"]:
+            payload[column] = schema["categorical"][column][0]
+        else:
+            payload[column] = 1000.0
+    return payload
