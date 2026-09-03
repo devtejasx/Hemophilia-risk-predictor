@@ -7,6 +7,13 @@ docstrings, which in this repository were frequently aspirational.
 The consolidation decisions that follow from this audit are in
 [CANONICAL.md](CANONICAL.md).
 
+> **Historical record.** This page describes the repository *as it was on
+> 2026-08-31*. Its references to CHAMP are deliberate and are not describing the
+> current system: the application has since moved to the MMC2 + MMC3 dataset.
+> The CHAMP pipeline it audits now lives in `archive/legacy-champ/`. For what
+> the system does today, read [ML.md](ML.md) and the
+> [README](../README.md).
+
 ## Headline finding
 
 **No committed model was trained on CHAMP.** `train.py` loaded `genomic.csv` +

@@ -1,15 +1,15 @@
 {
   "model_version": "legacy-synthetic-v0",
   "status": "preserved-not-servable",
-  "status_reason": "Preserved for provenance only. These artifacts were fitted on 30 fabricated rows (tests/fixtures/synthetic_*.csv) whose label is a deterministic function of mutation_type and severity, at a 24-train / 6-test split. Their 20-feature space includes age_first_treatment, dose_intensity, exposure_days and cumulative_exposure, none of which exist in CHAMP, so they cannot serve the CHAMP pipeline. See PROVENANCE.md.",
-  "provenance_warning": "Trained on fabricated data, not CHAMP. Any metric from this version is a property of a hand-written rule, not of biology.",
+  "status_reason": "Preserved for provenance only. These artifacts were fitted on 30 fabricated rows (tests/fixtures/synthetic_*.csv) whose label is a deterministic function of mutation_type and severity, at a 24-train / 6-test split. Their 20-feature space includes age_first_treatment, dose_intensity, exposure_days and cumulative_exposure, none of which exist in MMC2 or MMC3, so they cannot serve this application's pipeline. See PROVENANCE.md.",
+  "provenance_warning": "Trained on fabricated data, not on any real dataset. Any metric from this version is a property of a hand-written rule, not of biology.",
   "model_type": "RandomForestClassifier (model_ensemble.pkl == rf.pkl, byte-identical)",
   "training_date": "unknown - not recorded by the original pipeline",
   "preprocessing_version": "none - preprocessing was inline in archive/legacy-ml/data_fusion.py",
   "produced_by": "archive/legacy-ml/train.py",
   "dataset": {
     "name": "synthetic-fixture",
-    "description": "30 hand-written rows; not CHAMP, not clinical data",
+    "description": "30 hand-written rows; not a real dataset, not clinical data",
     "files": [
       "tests/fixtures/synthetic_genomic.csv",
       "tests/fixtures/synthetic_clinical.csv"
@@ -47,7 +47,7 @@
       "severity_moderate",
       "severity_severe"
     ],
-    "note": "4 of these have no counterpart in CHAMP"
+    "note": "4 of these have no counterpart in MMC2 or MMC3"
   },
   "calibration": {
     "method": null,

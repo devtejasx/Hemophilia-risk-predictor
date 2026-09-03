@@ -66,14 +66,21 @@ const MethodPanel: React.FC<{ title: string; note: string; data?: MethodExplanat
         {data.contributions.map((c) => (
           <li key={c.feature}>
             <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="text-slate-900 dark:text-white">{c.feature}</span>
+              <span className="text-slate-900 dark:text-white">
+                {c.label || c.feature}
+              </span>
               <span className="text-slate-500 dark:text-slate-400 text-xs text-right">
-                {String(c.value ?? '—')}
+                {c.supplied ? String(c.value ?? '—') : 'not reported'}
               </span>
             </div>
             <ContributionBar value={c.contribution} max={max} />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
-              {c.direction === 'increases' ? 'Increases' : 'Decreases'} the estimate
+              {c.direction === 'increases'
+                ? 'Increases'
+                : c.direction === 'decreases'
+                  ? 'Decreases'
+                  : 'No effect on'}{' '}
+              the estimate
               {' · '}
               {c.contribution >= 0 ? '+' : ''}
               {c.contribution.toFixed(4)}

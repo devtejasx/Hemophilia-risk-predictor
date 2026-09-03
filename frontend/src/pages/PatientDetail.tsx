@@ -9,12 +9,12 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
-import { Disclaimer, VariantLevelNote } from '@/components/Disclaimer'
-import GenomicForm from '@/components/GenomicForm'
+import { Disclaimer, RecordLevelNote } from '@/components/Disclaimer'
+import PredictionForm from '@/components/PredictionForm'
 
 /**
- * One patient: their record, the genomic input form, and the full history of
- * estimates made for them.
+ * One patient: their record, the inhibitor-risk input form, and the full
+ * history of estimates made for them.
  */
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -93,17 +93,17 @@ const PatientDetail: React.FC = () => {
           <Dna className="w-4 h-4" /> New risk estimate
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Enter the F8 variant as described in CHAMP. Options are limited to values the
-          model was actually trained on.
+          Describe the F8 variant, the clinical record, or both. Options are
+          limited to values the model was actually trained on.
         </p>
-        <GenomicForm patientId={patientId} onPredicted={refresh} />
+        <PredictionForm patientId={patientId} onPredicted={refresh} />
       </section>
 
       <section>
         <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white mb-1">
           <History className="w-4 h-4" /> Prediction history
         </h2>
-        <VariantLevelNote />
+        <RecordLevelNote />
 
         {history.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
@@ -130,7 +130,8 @@ const PatientDetail: React.FC = () => {
                   </Link>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {p.created_at} · model {p.model_version}
+                  {p.created_at} · {p.feature_set} · model {p.model_version}
+                  {p.mutation_label ? ' · ' + p.mutation_label : ''}
                 </p>
               </li>
             ))}

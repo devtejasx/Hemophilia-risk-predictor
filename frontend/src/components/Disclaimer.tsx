@@ -30,14 +30,16 @@ export const Disclaimer: React.FC<{ variant?: 'banner' | 'inline'; children?: Re
 )
 
 /**
- * The unit-of-analysis caveat. CHAMP rows are F8 variants, so an estimate is
- * attributable to the variant and not to an individual.
+ * The unit-of-analysis caveat. A row of the training data is one *reported
+ * clinical record* of an F8 mutation, and several records may describe the same
+ * mutation, so an estimate is attributable to the record's description and not
+ * to an individual's future.
  */
-export const VariantLevelNote: React.FC = () => (
+export const RecordLevelNote: React.FC = () => (
   <p className="text-xs text-slate-500 dark:text-slate-400">
-    Estimates are attributed to the F8 variant, based on reported inhibitor history in
-    the CHAMP registry. They are not an individual patient&rsquo;s probability of
-    developing an inhibitor.
+    Estimates describe how often records with this mutation and clinical
+    description reported inhibitor development. They are not an individual
+    patient&rsquo;s probability of developing an inhibitor.
   </p>
 )
 
