@@ -112,11 +112,21 @@ class Settings:
                 "CORS_ORIGINS contains '*', which browsers reject alongside "
                 "credentials. Set explicit origins."
             )
-        if self.model_version == "legacy-synthetic-v0":
-            warnings.append(
-                "ML_MODEL_VERSION is the legacy synthetic model, which was "
-                "trained on fabricated data and cannot be served."
-            )
+        if self.model_version:
+            # A positive check, not a blocklist: pinning anything other than a
+            # current MMC2/MMC3 artifact is almost always a stale value carried
+            # over from a previous deployment, and it silently disables mode
+            # routing. Naming the known-good versions means a new artifact has
+            # to be introduced deliberately rather than by typo.
+            from ml.inference import FEATURE_SET_VERSIONS
+
+            known = set(FEATURE_SET_VERSIONS.values())
+            if self.model_version not in known:
+                warnings.append(
+                    f"ML_MODEL_VERSION={self.model_version!r} is not one of the "
+                    f"MMC2/MMC3 artifacts ({', '.join(sorted(known))}). Leave it "
+                    "empty to serve every prediction mode."
+                )
         if self.default_feature_set not in {"genomic", "clinical", "merged"}:
             warnings.append(
                 f"ML_DEFAULT_FEATURE_SET={self.default_feature_set!r} is not one "

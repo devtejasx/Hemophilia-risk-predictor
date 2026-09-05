@@ -36,19 +36,27 @@ def main() -> int:
     p3 = Path(args.mmc3) if args.mmc3 else ha.mmc3_path()
 
     try:
-        merged, labels, merge, sources = ha.load_merged(p2, p3)
+        bundle = ha.load_mutation_table(p2, p3)
     except (FileNotFoundError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
-    specs = ha.build_feature_specs(merged)
+    labels, merge, sources = bundle.labels, bundle.merge, bundle.sources
+    groups, population = bundle.groups, bundle.population()
+    specs = ha.build_feature_specs(bundle.mutations)
 
     payload = {
         "sources": [s.as_dict() for s in sources],
         "labels": labels.as_dict(),
         "merge": merge.as_dict(),
+        "mutation_level": groups.as_dict(),
+        "population": population,
         "missing_by_feature": merge.missing_by_feature,
         "feature_sets": {name: spec.as_dict() for name, spec in specs.items()},
+        "identifier_like_features": {
+            name: ha.identifier_like_columns(bundle.mutations, spec.columns)
+            for name, spec in specs.items()
+        },
     }
 
     if args.json:
@@ -92,18 +100,45 @@ def main() -> int:
             for variant, canonical in mapping.items():
                 print(f"      {col:14} {variant!r} -> {canonical!r}")
 
-    print("\nMISSING VALUES BY CANDIDATE FEATURE (merged frame)")
+    print("\nFUSION TO ONE ROW PER MUTATION")
+    for key, value in population.items():
+        print(f"  {key:34} {value}")
+    print(f"  {'records_per_mutation_mean':34} {groups.records_per_mutation_mean:.2f}")
+    if groups.n_conflicting:
+        sample = ", ".join(groups.conflicting_mut_ids[:10])
+        print(
+            f"\n  {groups.n_conflicting} mutations have clinical records that "
+            "disagree about the\n  inhibitor outcome and are EXCLUDED from "
+            f"supervised training (mut_id {sample}, ...).\n  They are not "
+            "resolved by majority vote: the source data does not contain a\n"
+            "  single answer for them."
+        )
+
+    print("\nMISSING VALUES BY CANDIDATE FEATURE (record-level merged frame)")
     for col, rate in sorted(
         merge.missing_by_feature.items(), key=lambda kv: -kv[1]
     ):
         print(f"  {col:16} {rate:7.2%}")
 
-    print("\nFEATURE SETS")
+    print("\nFEATURE SETS  (model features are aggregates of the source fields)")
     for name, spec in specs.items():
-        print(f"  {name}  ({len(spec.columns)} columns)")
-        print(f"    categorical  {list(spec.categorical)}")
-        print(f"    numeric      {list(spec.numeric)}")
-        print(f"    dropped      {list(spec.dropped) or 'none'}")
+        print(
+            f"  {name}  ({len(spec.columns)} model features from "
+            f"{len(spec.inputs)} source fields)"
+        )
+        print(f"    source fields  {list(spec.inputs)}")
+        print(f"    categorical    {list(spec.categorical)}")
+        print(f"    numeric        {list(spec.numeric)}")
+        print(f"    required       {list(spec.required)}")
+
+    print("\nIDENTIFIER GUARD")
+    print(
+        f"  A categorical feature may not be more than "
+        f"{ha.MAX_CATEGORY_UNIQUENESS_RATIO:.0%} distinct."
+    )
+    for name, spec in specs.items():
+        offenders = ha.identifier_like_columns(bundle.mutations, spec.columns)
+        print(f"  {name:9} {offenders or 'clean'}")
 
     print("\nEXCLUDED COLUMNS")
     for col, reason in ha.EXCLUDED_COLUMNS.items():

@@ -30,16 +30,17 @@ export const Disclaimer: React.FC<{ variant?: 'banner' | 'inline'; children?: Re
 )
 
 /**
- * The unit-of-analysis caveat. A row of the training data is one *reported
- * clinical record* of an F8 mutation, and several records may describe the same
- * mutation, so an estimate is attributable to the record's description and not
- * to an individual's future.
+ * The unit-of-analysis caveat. A row of the training data is one *F8 mutation*:
+ * MMC2 describes the mutation itself, MMC3 supplies the clinical records
+ * reported for it, and the several records that may name the same mutation are
+ * aggregated into that single row. An estimate is therefore attributable to the
+ * mutation as the source literature reports it, not to an individual's future.
  */
-export const RecordLevelNote: React.FC = () => (
+export const MutationLevelNote: React.FC = () => (
   <p className="text-xs text-slate-500 dark:text-slate-400">
-    Estimates describe how often records with this mutation and clinical
-    description reported inhibitor development. They are not an individual
-    patient&rsquo;s probability of developing an inhibitor.
+    An estimate describes a mutation, not a person: how often this F8 mutation
+    is reported alongside an inhibitor in the source literature. It is not an
+    individual patient&rsquo;s probability of developing an inhibitor.
   </p>
 )
 

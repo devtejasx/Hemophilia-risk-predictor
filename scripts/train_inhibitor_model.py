@@ -4,24 +4,22 @@
     python scripts/train_inhibitor_model.py --feature-set merged
     python scripts/train_inhibitor_model.py --seed 7 --version-suffix v2
 
-Pipeline order matters and is enforced here:
+Pipeline order matters and is enforced here::
 
     load MMC2 + MMC3 -> validate -> filter F8 -> encode target
          -> merge on mut_id
-         -> GROUPED SPLIT FIRST (mut_id never crosses a split boundary)
+         -> AGGREGATE to one row per mutation, dropping conflicting labels
+         -> GROUPED SPLIT (mut_id never crosses a split boundary)
          -> resolve feature sets from the columns that actually exist
          -> fit preprocessor on TRAIN ONLY
          -> model selection by grouped cross-validated ROC-AUC
-         -> isotonic calibration on train
+         -> isotonic calibration on train, using the same grouped folds
          -> choose the decision threshold on the VALIDATION split
          -> evaluate ONCE on the held-out test split
          -> write model + preprocessor + background + metadata + metrics
 
 Every number in metrics.json comes from this run. Nothing is copied from a
 report or hand-edited.
-
-Reference: final(1).ipynb, cells 3-10. Deviations are listed in
-``hemophilia_a.NOTEBOOK_DEVIATIONS`` and repeated in each metadata.json.
 """
 
 from __future__ import annotations
@@ -64,15 +62,27 @@ from sklearn.metrics import (  # noqa: E402
 from sklearn.model_selection import (  # noqa: E402
     GroupShuffleSplit,
     StratifiedGroupKFold,
-    cross_val_score,
+    cross_validate,
 )
+from sklearn.neural_network import MLPClassifier  # noqa: E402
+from sklearn.svm import SVC  # noqa: E402
 from xgboost import XGBClassifier  # noqa: E402
+from lightgbm import LGBMClassifier  # noqa: E402
+from catboost import CatBoostClassifier  # noqa: E402
 
 from ml.preprocessing import hemophilia_a as ha  # noqa: E402
 
-PREPROCESSING_VERSION = "mmc-preprocessing-1"
+PREPROCESSING_VERSION = "mmc2-mmc3-preprocessing-1"
 DATASET_NAME = "MMC2+MMC3"
-VERSION_PREFIX = "mmc"
+
+#: Artifact name per feature set. The name says which source table the model
+#: sees, so a served version can never be mistaken for one fitted on a
+#: different block.
+VERSION_NAMES: dict[str, str] = {
+    "genomic": "mmc2-genomic",
+    "clinical": "mmc3-clinical",
+    "merged": "mmc2-mmc3",
+}
 
 
 # --------------------------------------------------------------------------
@@ -80,16 +90,23 @@ VERSION_PREFIX = "mmc"
 # --------------------------------------------------------------------------
 
 
-def candidate_models(seed: int) -> dict[str, object]:
+def candidate_models(seed: int, positive_rate: float) -> dict[str, object]:
     """The families compared before one is fitted.
 
-    Unchanged from the previous pipeline: class weighting handles the ~17%
-    positive rate without resampling, and SMOTE is evaluated separately inside
-    cross-validation folds only.
+    Every family is given the class imbalance explicitly rather than being left
+    to learn it: at a ~20% positive rate an unweighted fit on this data can
+    reach ~0.80 accuracy by answering "no inhibitor" to everything. The weight
+    is computed from the split actually being trained on, not assumed.
+
+    SMOTE appears only inside an imbalanced-learn pipeline, so resampling
+    happens within each cross-validation fold and never touches the fold being
+    scored. It is never applied before the split.
     """
+    pos_weight = (1 - positive_rate) / positive_rate if positive_rate else 1.0
+
     return {
         "logistic_regression": LogisticRegression(
-            max_iter=2000, class_weight="balanced", random_state=seed
+            max_iter=5000, class_weight="balanced", random_state=seed
         ),
         "random_forest": RandomForestClassifier(
             n_estimators=400,
@@ -105,9 +122,47 @@ def candidate_models(seed: int) -> dict[str, object]:
             learning_rate=0.05,
             subsample=0.9,
             colsample_bytree=0.9,
+            scale_pos_weight=pos_weight,
             eval_metric="logloss",
             random_state=seed,
             n_jobs=-1,
+        ),
+        "lightgbm": LGBMClassifier(
+            n_estimators=400,
+            num_leaves=15,
+            learning_rate=0.05,
+            min_child_samples=10,
+            subsample=0.9,
+            subsample_freq=1,
+            colsample_bytree=0.9,
+            class_weight="balanced",
+            random_state=seed,
+            n_jobs=-1,
+            verbose=-1,
+        ),
+        "catboost": CatBoostClassifier(
+            iterations=300,
+            depth=5,
+            learning_rate=0.05,
+            auto_class_weights="Balanced",
+            random_seed=seed,
+            verbose=0,
+            allow_writing_files=False,
+        ),
+        "svm_rbf": SVC(
+            C=1.0,
+            gamma="scale",
+            class_weight="balanced",
+            probability=False,  # calibrated downstream from decision_function
+            random_state=seed,
+        ),
+        "mlp": MLPClassifier(
+            hidden_layer_sizes=(64, 32),
+            alpha=1e-3,
+            max_iter=1000,
+            early_stopping=True,
+            n_iter_no_change=15,
+            random_state=seed,
         ),
         "random_forest_smote": ImbPipeline(
             [
@@ -145,12 +200,13 @@ def grouped_split(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Split row indices so no ``mut_id`` appears in two partitions.
 
-    A plain row-level split would put clinical records of the *same* mutation
-    into training and test. Those records share an identical genomic block, so
-    the model would be scored on mutations it had already memorised.
+    After aggregation each mutation is already a single row, so this is a
+    guarantee rather than a constraint - which is exactly why it is still
+    asserted: the assertion is what would catch a future change that reverts to
+    record-level rows and silently reintroduces the leak.
 
-    Follows final(1).ipynb cell 5: GroupShuffleSplit for train+val / test, then
-    again for train / val, with a different seed for the inner split.
+    GroupShuffleSplit for train+val / test, then again for train / val with a
+    different seed for the inner split.
     """
     groups = merged[ha.GROUP_COLUMN].to_numpy()
     y = merged[ha.TARGET_COLUMN].to_numpy()
@@ -241,8 +297,9 @@ def leakage_probe(merged: pd.DataFrame, columns: list[str]) -> dict[str, float]:
     """Per-column association with the target, as a leakage tell-tale.
 
     A column whose value almost determines the label is reported here so it can
-    be reviewed. ``uinhibitor`` — MMC2's curated inhibitor status — scores near
-    1.0, which is why it is on the exclusion list.
+    be reviewed. Run over the features that actually reach the model, so a high
+    score is a finding, not an expectation: the known leaks (uinhibitor, type,
+    utype, assay) are already on the exclusion list and never appear.
     """
     y = merged[ha.TARGET_COLUMN]
     scores: dict[str, float] = {}
@@ -310,16 +367,23 @@ def train_one(
     cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=seed)
     folds = list(cv.split(Xt_train, y_train, groups=groups[train_idx]))
 
+    positive_rate = float(y_train.mean())
     cv_results: dict[str, dict[str, float]] = {}
-    for name, model in candidate_models(seed).items():
-        auc = cross_val_score(model, Xt_train, y_train, cv=folds, scoring="roc_auc")
-        ap = cross_val_score(
-            model, Xt_train, y_train, cv=folds, scoring="average_precision"
+    for name, model in candidate_models(seed, positive_rate).items():
+        scores = cross_validate(
+            model,
+            Xt_train,
+            y_train,
+            cv=folds,
+            scoring=("roc_auc", "average_precision"),
+            error_score="raise",
         )
+        auc, ap = scores["test_roc_auc"], scores["test_average_precision"]
         cv_results[name] = {
             "roc_auc_mean": float(auc.mean()),
             "roc_auc_std": float(auc.std()),
             "pr_auc_mean": float(ap.mean()),
+            "pr_auc_std": float(ap.std()),
         }
         print(
             f"    {name:22} ROC-AUC {auc.mean():.4f} +/- {auc.std():.4f}"
@@ -330,8 +394,10 @@ def train_one(
     print(f"    -> selected {best_name}")
 
     # -- calibrate, using the same grouped folds -------------------------
+    # Isotonic on the training split only. The folds are the grouped ones, so
+    # calibration never sees a mutation in both its fit and its scoring half.
     calibrated = CalibratedClassifierCV(
-        candidate_models(seed)[best_name], method="isotonic", cv=folds
+        candidate_models(seed, positive_rate)[best_name], method="isotonic", cv=folds
     )
     calibrated.fit(Xt_train, y_train)
 
@@ -404,19 +470,29 @@ def train_one(
             "numpy": np.__version__,
             "pandas": pd.__version__,
         },
-        "notebook_reference": "final(1).ipynb",
-        "notebook_deviations": list(ha.NOTEBOOK_DEVIATIONS),
+        "pipeline_decisions": list(ha.PIPELINE_DECISIONS),
         "limitations": [
-            "A record is one clinical report, and several reports may describe "
-            "the same mutation. Splits are grouped on mut_id so a mutation never "
-            "spans two partitions, but the genomic block is still repeated within "
-            "a group.",
+            "The unit is a mutation, not a patient. An estimate describes how "
+            "often this mutation is reported with an inhibitor in the published "
+            "literature behind MMC3, not an individual's risk.",
             f"{dataset_block['labels']['n_excluded_unlabelled']} MMC3 records "
-            "without an explicit Yes/No inhibitor value were excluded. That "
-            "exclusion is unlikely to be random, so metrics describe the reported "
-            "subset of this dataset.",
-            "uinhibitor (MMC2's curated inhibitor status) is excluded as a leakage "
-            "feature; it reproduces the label almost exactly.",
+            "without an explicit Yes/No inhibitor value were excluded, leaving "
+            f"{dataset_block['population']['n_mutations_unknown']} F8 mutations "
+            "with no usable label at all. That exclusion is unlikely to be "
+            "random, so metrics describe the reported subset of this dataset, "
+            "not population incidence.",
+            f"{dataset_block['population']['n_conflicting_excluded']} mutations "
+            "whose clinical records disagree about the outcome were excluded "
+            "rather than resolved by majority vote. Those are plausibly the "
+            "hardest cases, so the modelled population is easier than the whole.",
+            "uinhibitor, type, utype and assay are excluded as leakage: each "
+            "either mirrors the label or exists only because inhibitor testing "
+            "was performed. See metadata.features.excluded_columns for the full "
+            "list and the reason for each.",
+            "Clinical aggregates come from a median of 1 record per mutation "
+            "(max "
+            f"{dataset_block['mutation_level']['records_per_mutation_max']}), so "
+            "for most mutations the mean, median, min and max coincide.",
             "No external validation cohort. Not clinically validated.",
         ],
     }
@@ -459,7 +535,7 @@ def main() -> int:
     parser.add_argument(
         "--version-suffix",
         default="v1",
-        help="Artifact version becomes mmc-<feature set>-<suffix>.",
+        help="Artifact version becomes mmc2-mmc3-<suffix> and friends.",
     )
     args = parser.parse_args()
 
@@ -468,16 +544,18 @@ def main() -> int:
     artifacts_root = Path(args.artifacts_dir or (REPO_ROOT / "ml" / "artifacts"))
 
     print("=" * 72)
-    print("Hemophilia A inhibitor-risk training  (MMC2 + MMC3)")
+    print("Hemophilia A inhibitor-risk training  (MMC2 + MMC3, mutation-level)")
     print("=" * 72)
 
-    # -- 1. load, validate, merge ----------------------------------------
+    # -- 1. load, validate, merge, aggregate -----------------------------
     p2 = Path(args.mmc2) if args.mmc2 else ha.mmc2_path()
     p3 = Path(args.mmc3) if args.mmc3 else ha.mmc3_path()
-    merged, labels, merge_report, sources = ha.load_merged(p2, p3)
+    bundle = ha.load_mutation_table(p2, p3)
+    mutations, labels, merge_report = bundle.mutations, bundle.labels, bundle.merge
+    population = bundle.population()
 
     print("\n[1] Sources")
-    for report in sources:
+    for report in bundle.sources:
         print(
             f"    {report.name:5} {report.n_rows:6} rows  {report.n_columns:3} cols  "
             f"{report.n_unique_mut_id:5} unique mut_id  "
@@ -490,28 +568,38 @@ def main() -> int:
         f"({labels.n_positive} positive, {labels.positive_rate:.2%}); "
         f"{labels.n_excluded_unlabelled} excluded {labels.excluded_values}"
     )
+
     print("\n[2] Merge on mut_id")
     for key, value in merge_report.as_dict().items():
-        print(f"    {key:28} {value}")
+        if key not in ("case_collapses",):
+            print(f"    {key:28} {value}")
+
+    print("\n[3] Fusion to one row per mutation")
+    for key, value in population.items():
+        print(f"    {key:32} {value}")
 
     # -- 2. GROUPED SPLIT, before anything is fitted ---------------------
     train_idx, val_idx, test_idx = grouped_split(
-        merged, seed, args.test_size, args.val_size
+        mutations, seed, args.test_size, args.val_size
     )
-    group_summary = assert_no_group_overlap(merged, train_idx, val_idx, test_idx)
+    group_summary = assert_no_group_overlap(mutations, train_idx, val_idx, test_idx)
     split_summary = {
-        "strategy": "GroupShuffleSplit on mut_id (80/20, then 80/20 of the remainder)",
+        "strategy": (
+            "GroupShuffleSplit on mut_id (80/20, then 80/20 of the remainder), "
+            "over the mutation-level table"
+        ),
+        "unit": "one F8 mutation",
         "seed": seed,
         "train": int(len(train_idx)),
         "validation": int(len(val_idx)),
         "test": int(len(test_idx)),
-        "train_positive": int(merged[ha.TARGET_COLUMN].iloc[train_idx].sum()),
-        "validation_positive": int(merged[ha.TARGET_COLUMN].iloc[val_idx].sum()),
-        "test_positive": int(merged[ha.TARGET_COLUMN].iloc[test_idx].sum()),
-        "unique_mutations": int(merged[ha.GROUP_COLUMN].nunique()),
+        "train_positive": int(mutations[ha.TARGET_COLUMN].iloc[train_idx].sum()),
+        "validation_positive": int(mutations[ha.TARGET_COLUMN].iloc[val_idx].sum()),
+        "test_positive": int(mutations[ha.TARGET_COLUMN].iloc[test_idx].sum()),
+        "unique_mutations": int(mutations[ha.GROUP_COLUMN].nunique()),
         **group_summary,
     }
-    print("\n[3] Grouped split (mut_id never crosses a boundary)")
+    print("\n[4] Grouped split (mut_id never crosses a boundary)")
     for key in (
         "train",
         "validation",
@@ -524,27 +612,39 @@ def main() -> int:
     ):
         print(f"    {key:20} {split_summary[key]}")
 
-    # -- 3. feature sets, required-ness judged on the TRAINING split -----
-    specs = ha.build_feature_specs(merged, merged.iloc[train_idx])
-    print("\n[4] Feature sets")
+    # -- 3. feature sets, resolved on the TRAINING split alone -----------
+    # Both arguments are the training split, so nothing about the validation or
+    # test rows decides which columns become features or which are marked
+    # required. This is stricter than it needs to be -- the resolved sets are
+    # identical either way on this data -- but "the feature space was chosen
+    # without looking at the test set" is a property worth holding by
+    # construction rather than by coincidence.
+    training_rows = mutations.iloc[train_idx]
+    specs = ha.build_feature_specs(training_rows, training_rows)
+    print("\n[5] Feature sets")
     for name, spec in specs.items():
         print(
-            f"    {name:9} {len(spec.columns):3} columns "
-            f"({len(spec.categorical)} categorical, {len(spec.numeric)} numeric); "
-            f"dropped {list(spec.dropped) or 'none'}"
+            f"    {name:9} {len(spec.columns):3} model features from "
+            f"{len(spec.inputs):2} source fields "
+            f"({len(spec.categorical)} categorical, {len(spec.numeric)} numeric)"
         )
 
-    probe = leakage_probe(merged, [*specs["merged"].columns, "uinhibitor"])
-    print("\n[5] Leakage probe (weighted |class rate - base rate|, top 6)")
+    probe = leakage_probe(mutations, list(specs["merged"].columns))
+    print("\n[6] Leakage probe (weighted |class rate - base rate|, top 6)")
     for col, score in list(probe.items())[:6]:
-        flag = "  <-- EXCLUDED" if col in ha.EXCLUDED_COLUMNS else ""
-        print(f"    {col:16} {score:.4f}{flag}")
+        print(f"    {col:24} {score:.4f}")
+    identifiers = ha.identifier_like_columns(mutations, specs["merged"].columns)
+    print(
+        f"    identifier-like features reaching the model: "
+        f"{identifiers or 'none'}"
+    )
 
     dataset_block = {
         "name": DATASET_NAME,
         "description": (
-            "Hemophilia A supplementary tables MMC2 (mutations) and MMC3 "
-            "(clinical records), joined on mut_id."
+            "Hemophilia A supplementary tables MMC2 (mutation description) and "
+            "MMC3 (clinical records), joined on mut_id and aggregated to one "
+            "row per mutation."
         ),
         "files": {
             "mmc2": {
@@ -557,11 +657,13 @@ def main() -> int:
             },
         },
         "join": {"key": ha.GROUP_COLUMN, "how": "inner", "genomic_rows_per_mutation": 1},
-        "unit_of_observation": "one clinical record of one F8 mutation",
+        "unit_of_observation": "one F8 mutation",
         "group_key": ha.GROUP_COLUMN,
         "label_column": ha.LABEL_COLUMN,
         "labels": labels.as_dict(),
         "merge": merge_report.as_dict(),
+        "mutation_level": bundle.groups.as_dict(),
+        "population": population,
         "leakage_probe": probe,
     }
 
@@ -570,14 +672,14 @@ def main() -> int:
     for name in wanted:
         results.append(
             train_one(
-                merged=merged,
+                merged=mutations,
                 spec=specs[name],
                 train_idx=train_idx,
                 val_idx=val_idx,
                 test_idx=test_idx,
                 split_summary=split_summary,
                 seed=seed,
-                version=f"{VERSION_PREFIX}-{name}-{args.version_suffix}",
+                version=f"{VERSION_NAMES[name]}-{args.version_suffix}",
                 artifacts_root=artifacts_root,
                 dataset_block=dataset_block,
             )

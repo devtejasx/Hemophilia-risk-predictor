@@ -1,8 +1,7 @@
 """MMC2 + MMC3 data integrity: loading, the join on mut_id, and the target.
 
 These numbers are asserted so a record cannot be dropped, duplicated or
-relabelled without the suite failing. They match the reference notebook
-(final(1).ipynb, cells 3-4).
+relabelled without the suite failing.
 """
 
 from __future__ import annotations
@@ -182,7 +181,9 @@ def test_whitespace_variants_are_normalised(prepared):
 def test_missing_values_are_reported_per_feature(prepared):
     _, _, report, _ = prepared
     assert report.missing_by_feature["mut_type"] == 0.0
-    assert report.missing_by_feature["assay"] > 0.99
+    # discrep is measured for almost nobody; the report must say so rather than
+    # letting a 99%-empty column look like a usable one.
+    assert report.missing_by_feature["discrep"] > 0.99
     assert set(report.missing_by_feature) <= set(ha.GENOMIC_CANDIDATES) | set(
         ha.CLINICAL_CANDIDATES
     )

@@ -10,8 +10,8 @@ import { errorMessage } from '@/services/api'
  * An earlier version of this form collected around twenty clinical fields
  * (blood type, joint damage score, adherence, HLA typing). None of them exist
  * in the dataset or reach the model, so collecting them implied a clinical
- * model that does not exist. The predictive input is the mutation and clinical
- * record, captured on the prediction screen.
+ * model that does not exist. The predictive input is the F8 mutation and the
+ * clinical findings reported for it, captured on the prediction screen.
  */
 const AddPatient: React.FC = () => {
   const navigate = useNavigate()
@@ -46,8 +46,8 @@ const AddPatient: React.FC = () => {
     <div className="p-8 max-w-xl">
       <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Add patient</h1>
       <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-        Identity only. Mutation and clinical details are entered when you run an
-        estimate.
+        Identity only. The F8 mutation and the clinical findings reported for it
+        are entered when you run an estimate.
       </p>
 
       <form

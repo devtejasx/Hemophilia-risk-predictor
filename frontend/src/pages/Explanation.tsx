@@ -9,7 +9,7 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
-import { Disclaimer } from '@/components/Disclaimer'
+import { Disclaimer, MutationLevelNote } from '@/components/Disclaimer'
 
 const ContributionBar: React.FC<{ value: number; max: number }> = ({ value, max }) => {
   const width = max === 0 ? 0 : (Math.abs(value) / max) * 100
@@ -158,6 +158,10 @@ const Explanation: React.FC = () => {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
           Why the model produced this estimate
         </h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          Which parts of the MMC2 mutation description and the MMC3 clinical
+          record moved this mutation&rsquo;s estimate, and in which direction.
+        </p>
       </div>
 
       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -170,6 +174,9 @@ const Explanation: React.FC = () => {
         <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">
           {prediction.interpretation}
         </p>
+        <div className="mt-2">
+          <MutationLevelNote />
+        </div>
       </div>
 
       <p className="text-sm text-slate-600 dark:text-slate-300">

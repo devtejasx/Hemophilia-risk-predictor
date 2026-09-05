@@ -115,15 +115,16 @@ CREATE INDEX IF NOT EXISTS idx_explanations_pred   ON explanations(prediction_id
 #: from most submissions.
 ANALYTICS_BREAKDOWN_COLUMN = "mut_type"
 
-#: Tables belonging to the retired CHAMP feature space. Their columns
+#: Tables belonging to the retired pre-MMC2/MMC3 feature space. Their columns
 #: (variant_type, mechanism, domain, …) cannot hold an MMC2/MMC3 record, and the
-#: rows in them were produced by a model that is no longer servable. They are
-#: renamed rather than dropped: the data is a user's own history and deleting it
-#: to make room for a new schema is not this migration's call to make.
-LEGACY_CHAMP_TABLES = {
-    "genomic_profiles": "legacy_champ_genomic_profiles",
-    "predictions": "legacy_champ_predictions",
-    "explanations": "legacy_champ_explanations",
+#: rows in them were produced by a superseded model version that is no longer
+#: servable. They are renamed rather than dropped: the data is a user's own
+#: history and deleting it to make room for a new schema is not this migration's
+#: call to make.
+LEGACY_SCHEMA_TABLES = {
+    "genomic_profiles": "legacy_pre_mmc_genomic_profiles",
+    "predictions": "legacy_pre_mmc_predictions",
+    "explanations": "legacy_pre_mmc_explanations",
 }
 
 _db_path: str = settings.database_path
@@ -157,7 +158,7 @@ def get_connection() -> Iterator[sqlite3.Connection]:
 
 def init_database() -> None:
     with get_connection() as conn:
-        migrate_legacy_champ_tables(conn)
+        migrate_legacy_schema_tables(conn)
         conn.executescript(SCHEMA)
     logger.info("Database ready at %s", _db_path)
 
@@ -166,15 +167,16 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def migrate_legacy_champ_tables(conn: sqlite3.Connection) -> list[str]:
-    """Move CHAMP-era tables aside so the new schema can be created.
+def migrate_legacy_schema_tables(conn: sqlite3.Connection) -> list[str]:
+    """Move tables of the retired pre-MMC2/MMC3 schema aside for the new one.
 
     Detection is by column, not by a version number: a ``genomic_profiles``
-    table is CHAMP-era if it has a ``variant_type`` column, and a
-    ``predictions`` table is if it references ``genomic_profile_id``. Both are
-    renamed with their data intact, together with the explanations that point at
-    them, so a `SELECT * FROM legacy_champ_predictions` still returns every
-    estimate the previous model made.
+    table belongs to the retired pre-MMC2/MMC3 feature space if it has a
+    ``variant_type`` column, and a ``predictions`` table does if it references
+    ``genomic_profile_id``. Both are renamed with their data intact, together
+    with the explanations that point at them, so a
+    `SELECT * FROM legacy_pre_mmc_predictions` still returns every estimate the
+    superseded model version produced.
 
     Nothing outside those three tables is touched: users and patients carry over
     unchanged, and their identifiers are unaffected by the rename.
@@ -196,7 +198,7 @@ def migrate_legacy_champ_tables(conn: sqlite3.Connection) -> list[str]:
         return []
 
     renamed: list[str] = []
-    for old, new in LEGACY_CHAMP_TABLES.items():
+    for old, new in LEGACY_SCHEMA_TABLES.items():
         if old not in existing or new in existing:
             continue
         conn.execute(f"ALTER TABLE {old} RENAME TO {new}")
@@ -204,9 +206,10 @@ def migrate_legacy_champ_tables(conn: sqlite3.Connection) -> list[str]:
 
     if renamed:
         logger.warning(
-            "Migrated CHAMP-era tables aside: %s. Their rows were produced by the "
-            "retired champ-v1 model and are preserved read-only under their "
-            "legacy_champ_* names; new predictions use case_records.",
+            "Migrated tables of the retired pre-MMC2/MMC3 feature space aside: "
+            "%s. Their rows were produced by a superseded model version and are "
+            "preserved read-only under their legacy_pre_mmc_* names; new "
+            "predictions use case_records.",
             ", ".join(renamed),
         )
     return renamed

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,6 +21,8 @@ from ml.preprocessing import hemophilia_a as ha
 from tests.conftest import MODEL_VERSION, requires_all_models, requires_model
 
 pytestmark = requires_model
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 # --------------------------------------------------------------------------
@@ -59,9 +62,27 @@ def test_metadata_records_both_source_files_by_hash():
 
 
 def test_metadata_records_the_grouped_split():
-    split = artifacts.load_bundle(MODEL_VERSION).metadata["split"]
+    """The split is over *mutations*, not clinical records.
+
+    A mutation contributes one row now, so the split rows and the split groups
+    are the same 2,515 objects - and one mutation's clinical records can no
+    longer straddle train and test, because they were collapsed before the
+    split ever happened.
+    """
+    bundle = artifacts.load_bundle(MODEL_VERSION)
+    split = bundle.metadata["split"]
+    population = bundle.metadata["dataset"]["mutation_level"]
+
     assert "mut_id" in split["strategy"]
-    assert split["train"] + split["validation"] + split["test"] == 4962
+    assert split["unit"] == "one F8 mutation"
+    # Every modelled mutation lands in exactly one split, and the three splits
+    # account for the whole modelling population - nothing quietly dropped.
+    assert (
+        split["train"] + split["validation"] + split["test"]
+        == split["unique_mutations"]
+        == population["n_final_modelling_population"]
+        == 2515
+    )
     assert (
         split["train_mutations"] + split["validation_mutations"] + split["test_mutations"]
         == split["unique_mutations"]
@@ -88,12 +109,38 @@ def test_metadata_feature_count_matches_the_estimator():
 
 
 def test_metadata_carries_a_reconstructible_feature_spec():
+    """The spec now carries two column lists, and both have to survive the round
+    trip through metadata: ``inputs`` (the raw MMC2/MMC3 fields a caller sends)
+    and ``columns`` (the aggregates the estimator consumes)."""
     bundle = artifacts.load_bundle(MODEL_VERSION)
     spec = bundle.feature_spec
     assert spec.name == bundle.feature_set == "merged"
-    assert len(spec.columns) == 29
-    assert ha.LABEL_COLUMN not in spec.columns
-    assert ha.GROUP_COLUMN not in spec.columns
+
+    assert spec.columns == [*spec.categorical, *spec.numeric]
+    assert spec.inputs
+    # Each measurement fans out into mean/median/min/max/censored_rate, so the
+    # model always consumes more columns than a caller supplies fields.
+    assert len(spec.columns) > len(spec.inputs)
+    # required is a promise about what the *caller* must send, not about the
+    # derived features.
+    assert set(spec.required) <= set(spec.inputs)
+
+    for reserved in (ha.LABEL_COLUMN, ha.GROUP_COLUMN, ha.TARGET_COLUMN):
+        assert reserved not in spec.columns
+        assert reserved not in spec.inputs
+
+    # Every model feature is traceable back to a field the caller filled in, so
+    # an explanation can name "FVIII clotting activity" rather than
+    # "num__clotting_median".
+    assert {spec.source_column_for(c) for c in spec.columns} <= set(spec.inputs)
+    assert spec.source_column_for("num__clotting_median") == "clotting"
+    assert spec.source_column_for("num__severity_prop_severe") == "cli_phe"
+    assert spec.source_column_for("cat__cli_phe_mode_Severe") == "cli_phe"
+
+    # Nothing excluded as leakage or as an identifier came back in through
+    # either list.
+    assert not set(spec.columns) & set(ha.EXCLUDED_COLUMNS)
+    assert not set(spec.inputs) & set(ha.EXCLUDED_COLUMNS)
 
 
 def test_bundle_is_cached_and_not_reloaded_per_call():
@@ -107,13 +154,33 @@ def test_unknown_version_raises_with_available_versions_listed():
         artifacts.load_bundle("does-not-exist")
 
 
-def test_legacy_synthetic_artifacts_are_preserved_but_refuse_to_serve():
-    assert "legacy-synthetic-v0" in artifacts.available_versions()
-    meta = artifacts.read_metadata("legacy-synthetic-v0")
-    assert meta["status"] == "preserved-not-servable"
-    assert "fabricated" in meta["provenance_warning"]
-    with pytest.raises(artifacts.ArtifactError, match="preserved for provenance"):
+def test_only_mmc_artifacts_can_be_served():
+    """A model that never saw MMC2/MMC3 must not be reachable from the serving
+    path at all.
+
+    ``legacy-synthetic-v0`` was fitted on fabricated rows. It used to sit in
+    ml/artifacts/ behind a "preserved-not-servable" flag - one metadata edit
+    away from being served. It now lives in archive/legacy-artifacts/, outside
+    the directory the loader scans, so this asserts on the directory contents
+    rather than on the flag: whatever is in there is servable by definition, so
+    only the three MMC2/MMC3 versions may be in there.
+    """
+    root = artifacts.artifacts_dir()
+    allowed = set(FEATURE_SET_VERSIONS.values()) | {"training_summary.json"}
+    present = {p.name for p in root.iterdir()}
+    assert present <= allowed, f"unexpected entries in {root}: {sorted(present - allowed)}"
+    assert MODEL_VERSION in present
+
+    assert "legacy-synthetic-v0" not in artifacts.available_versions()
+    with pytest.raises(artifacts.ArtifactError, match="Available"):
         artifacts.load_bundle("legacy-synthetic-v0")
+
+    # Archived, not deleted: the fabricated-data provenance record is still
+    # readable, it is just no longer loadable.
+    archived = REPO_ROOT / "archive" / "legacy-artifacts" / "legacy-synthetic-v0"
+    assert archived.is_dir()
+    meta = json.loads((archived / "metadata.json").read_text(encoding="utf-8"))
+    assert "fabricated" in meta["provenance_warning"]
 
 
 def test_metrics_file_records_a_real_evaluation():
@@ -228,10 +295,20 @@ def test_each_feature_set_serves_its_own_model():
 
 @requires_all_models
 def test_the_genomic_model_never_accepts_a_clinical_column():
+    """Asserted on ``inputs``, the fields a caller may send. ``columns`` would
+    pass vacuously now that the clinical block reaches the model as aggregates
+    (``clotting_mean``) whose names no longer match the raw candidates."""
     genomic = service_for_feature_set("genomic")
-    assert not set(genomic.spec.columns) & set(ha.CLINICAL_CANDIDATES)
+    assert not set(genomic.spec.inputs) & set(ha.CLINICAL_CANDIDATES)
+    assert not {
+        genomic.spec.source_column_for(c) for c in genomic.spec.columns
+    } & set(ha.CLINICAL_CANDIDATES)
+
     clinical = service_for_feature_set("clinical")
-    assert not set(clinical.spec.columns) & set(ha.GENOMIC_CANDIDATES)
+    assert not set(clinical.spec.inputs) & set(ha.GENOMIC_CANDIDATES)
+    assert not {
+        clinical.spec.source_column_for(c) for c in clinical.spec.columns
+    } & set(ha.GENOMIC_CANDIDATES)
 
 
 @requires_all_models
@@ -278,11 +355,25 @@ def test_unknown_value_in_a_closed_vocabulary_is_rejected(service, valid_payload
 
 
 def test_unseen_value_in_an_open_vocabulary_is_accepted(service, valid_payload):
-    """mut_syn is HGVS notation, not a category: a new mutation has a notation
-    the model has never seen, and the encoder has an infrequent bucket for it."""
-    assert "mut_syn" in service.input_schema()["open_vocabulary"]
-    result = service.predict({**valid_payload, "mut_syn": "c.9999999A>T"})
-    assert 0.0 <= result.probability <= 1.0
+    """A codon or a variant residue is notation, not a closed category.
+
+    The HGVS strings that used to carry this guarantee (mut_syn, aa_syn) are
+    excluded now - they were 95% and 81% unique, so they named the mutation
+    instead of describing it. The wide-vocabulary fields that remain keep the
+    same property: a newly reported mutation carries a spelling the encoder has
+    never seen, and the infrequent bucket absorbs it rather than the request
+    being rejected.
+    """
+    open_fields = service.input_schema()["open_vocabulary"]
+    assert open_fields
+    categories = ha.fitted_categories(service.bundle.preprocessor, service.spec)
+    vocab_column = {ha.aggregate_source_column(c): c for c in service.spec.categorical}
+
+    for field_name in open_fields:
+        unseen = "ZZZ-never-observed"
+        assert unseen not in categories[vocab_column[field_name]]
+        result = service.predict({**valid_payload, field_name: unseen})
+        assert 0.0 <= result.probability <= 1.0
 
 
 def test_case_only_typos_are_normalised_rather_than_rejected(service, valid_payload):
@@ -292,9 +383,26 @@ def test_case_only_typos_are_normalised_rather_than_rejected(service, valid_payl
 
 
 def test_non_numeric_number_is_rejected(service, valid_payload):
-    numeric = service.spec.numeric[0]
-    with pytest.raises(InputValidationError, match="must be a number"):
+    """Unparseable is rejected; censored is not.
+
+    The source files write measurements as free text - "<1" means below the
+    assay's detection limit and "1 to 5" is a reported range - so those are
+    readings, not typos, and the parser turns them into a value plus a
+    censoring flag. "abc" is not a reading at all and must still be refused
+    rather than silently imputed.
+    """
+    schema = service.input_schema()
+    numeric = next(f for f in schema["numeric"] if f in schema["required"])
+
+    with pytest.raises(InputValidationError, match="must be a measurement") as excinfo:
         service.predict({**valid_payload, numeric: "abc"})
+    assert excinfo.value.field == numeric
+
+    for field_name, description in schema["numeric"].items():
+        assert description["accepts_censored"] is True
+        for censored in ("<1", ">5", "1 to 5"):
+            result = service.predict({**valid_payload, field_name: censored})
+            assert 0.0 <= result.probability <= 1.0
 
 
 def test_non_dict_input_is_rejected(service):
@@ -311,10 +419,36 @@ def test_optional_fields_may_be_omitted(service, valid_payload):
 
 def test_omitted_optional_fields_are_marked_missing_not_invented(service, valid_payload):
     """A blank assay must stay blank. Filling it with the training mode would
-    report a measurement that was never taken."""
+    report a measurement that was never taken.
+
+    One omitted field now fans out into several model columns - an absent
+    ``antigen`` has to leave mean, median, min, max *and* the censoring rate
+    missing - so the check follows each optional field to every column derived
+    from it. A censored_rate of 0.0 for an assay that was never run would be a
+    fabricated measurement dressed up as a real one.
+    """
     frame = service.validate(valid_payload)
-    for column in service.input_schema()["optional"]:
+    omitted = set(service.input_schema()["optional"])
+    assert omitted  # the merged set has plenty
+    assert not omitted & set(valid_payload)
+
+    derived = [
+        c for c in service.spec.columns if service.spec.source_column_for(c) in omitted
+    ]
+    assert derived
+    for column in derived:
         assert frame[column].isna().all(), column
+
+    # The mirror image: what the caller did supply must actually reach the row,
+    # otherwise the assertion above would pass on an all-missing frame.
+    supplied = [
+        c
+        for c in service.spec.columns
+        if service.spec.source_column_for(c) in valid_payload
+    ]
+    assert supplied
+    for column in supplied:
+        assert frame[column].notna().all(), column
 
 
 def test_snake_case_keys_are_accepted(service, valid_payload):
@@ -328,20 +462,63 @@ def test_snake_case_keys_are_accepted(service, valid_payload):
 
 
 def test_input_schema_only_offers_categories_the_model_knows(service):
+    """The schema is keyed on the raw field a caller sends (``cli_phe``); the
+    fitted vocabulary lives on the aggregate the model consumes
+    (``cli_phe_mode``). The UI must still only ever offer values the encoder
+    actually saw."""
     schema = service.input_schema()
     categories = ha.fitted_categories(service.bundle.preprocessor, service.spec)
-    for column, allowed in schema["categorical"].items():
-        assert set(allowed) <= set(categories[column])
+    vocab_column = {ha.aggregate_source_column(c): c for c in service.spec.categorical}
+
+    assert schema["categorical"]
+    for field_name, allowed in schema["categorical"].items():
+        assert allowed
+        assert set(allowed) <= set(categories[vocab_column[field_name]])
         assert ha.MISSING_CATEGORY not in allowed
-    assert set(schema["required"]) <= set(service.spec.columns)
-    assert set(schema["required"]) | set(schema["optional"]) == set(service.spec.columns)
+
+    # A caller supplies raw fields, never the derived model features.
+    assert set(schema["required"]) <= set(service.spec.inputs)
+    assert set(schema["required"]) | set(schema["optional"]) == set(service.spec.inputs)
+    assert not set(schema["required"]) & set(schema["optional"])
+    assert not set(schema["categorical"]) & set(schema["numeric"])
+    assert set(schema["categorical"]) | set(schema["numeric"]) == set(service.spec.inputs)
+    # The aggregates are reported for transparency, not asked for. Genomic
+    # columns pass through under their own names, so the two lists overlap; it
+    # is the *derived* columns that must never be requested from a caller.
+    assert set(schema["model_features"]) == set(service.spec.columns)
+    derived = {
+        c for c in service.spec.columns if ha.aggregate_source_column(c) != c
+    }
+    assert derived
+    assert not derived & set(service.spec.inputs)
 
 
 def test_input_schema_labels_every_field_for_a_human(service):
     schema = service.input_schema()
-    for column in service.spec.columns:
-        assert schema["labels"][column]
-        assert schema["groups"][column] in {"genomic", "clinical"}
+    for field_name in service.spec.inputs:
+        assert schema["labels"][field_name]
+        # A real label, not the database column name echoed back.
+        assert schema["labels"][field_name] != field_name
+        assert schema["groups"][field_name] in {"genomic", "clinical"}
+
+    # Columns dropped as leakage (they exist only because inhibitor testing
+    # happened) or as near-unique identifiers are not offered to a caller under
+    # any name, so no form can ask for them.
+    for dropped in (
+        "type",
+        "utype",
+        "assay",
+        "pa_race",
+        "mut_syn",
+        "aa_syn",
+        "aa_change",
+        "codon_change",
+        "aa_numb_old",
+    ):
+        assert dropped in ha.EXCLUDED_COLUMNS
+        assert dropped not in schema["labels"]
+        assert dropped not in service.spec.inputs
+        assert dropped not in service.spec.columns
 
 
 def test_service_loads_the_model_once(valid_payload):

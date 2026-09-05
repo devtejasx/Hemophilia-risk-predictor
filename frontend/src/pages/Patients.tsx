@@ -53,7 +53,7 @@ const Patients: React.FC = () => {
           <Users className="w-8 h-8 mx-auto mb-3 text-slate-400" />
           <p className="text-slate-600 dark:text-slate-300 mb-1">No patients yet</p>
           <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-            Add one to record an F8 variant and run a risk estimate.
+            Add one to record an F8 mutation and run a risk estimate.
           </p>
           <Link
             to="/patients/new"

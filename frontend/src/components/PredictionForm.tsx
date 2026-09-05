@@ -9,9 +9,15 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
+import { MutationLevelNote } from '@/components/Disclaimer'
 
 /**
  * The inhibitor-risk input form.
+ *
+ * The model is fitted on one row per F8 mutation: MMC2 contributes the genomic
+ * description of the mutation, MMC3 the clinical records reported for it, and
+ * the two are fused at the mutation level. An estimate produced here therefore
+ * describes a mutation, not an individual patient.
  *
  * Nothing about the fields is hardcoded here. GET /api/predictions/schema
  * reports, for the chosen prediction mode, which fields the served model
@@ -22,38 +28,42 @@ import RiskBadge from '@/components/RiskBadge'
  *
  * Fields the schema marks `open_vocabulary` are identifiers or measurements
  * written as text (HGVS notation, an activity reading). Those get a free-text
- * input with the known values as suggestions, because a new patient's mutation
- * has a notation the model has not seen. Everything else is a strict select.
+ * input with the known values as suggestions, because the mutation you are
+ * describing may carry a notation the model has not seen. Everything else is a
+ * strict select.
  */
 
 const MODES: { id: FeatureSet; label: string; blurb: string }[] = [
   {
     id: 'merged',
-    label: 'Mutation + clinical',
-    blurb: 'Uses both blocks. Discriminates best; recommended when you have both.',
+    label: 'Genomic + clinical',
+    blurb:
+      'Fuses the MMC2 description of the mutation with the clinical findings MMC3 reports for it. Use it whenever you have both.',
   },
   {
     id: 'genomic',
-    label: 'Mutation only',
-    blurb: 'Only the F8 variant description. Use before assay results are back.',
+    label: 'Genomic only',
+    blurb:
+      'The MMC2 mutation description on its own — type, effect, location. Use it before any assay result is back.',
   },
   {
     id: 'clinical',
     label: 'Clinical only',
-    blurb: 'Only the reported clinical record and assay values.',
+    blurb:
+      'The MMC3 clinical record on its own — reported findings and assay values, with no mutation description.',
   },
 ]
 
 const SECTIONS: { group: 'clinical' | 'genomic'; title: string; blurb: string }[] = [
   {
     group: 'clinical',
-    title: 'Patient / clinical information',
-    blurb: 'What the clinical record reports for this case.',
+    title: 'Clinical information (MMC3)',
+    blurb: 'What the clinical records report for this mutation: findings and assay values.',
   },
   {
     group: 'genomic',
-    title: 'Genomic / mutation information',
-    blurb: 'How the F8 variant is described.',
+    title: 'Genomic information (MMC2)',
+    blurb: 'How the F8 mutation itself is described: type, effect and location.',
   },
 ]
 
@@ -260,8 +270,13 @@ const PredictionForm: React.FC<{ patientId: number; onPredicted?: () => void }> 
                   checked={mode === m.id}
                   onChange={() => setMode(m.id)}
                 />
-                <span className="block font-medium text-slate-900 dark:text-white">
+                <span className="flex items-center gap-2 font-medium text-slate-900 dark:text-white">
                   {m.label}
+                  {schema.default_feature_set === m.id && (
+                    <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-normal uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Default
+                    </span>
+                  )}
                 </span>
                 <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   {m.blurb}
@@ -304,9 +319,9 @@ const PredictionForm: React.FC<{ patientId: number; onPredicted?: () => void }> 
             Additional details ({optionalCount})
           </button>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Most of these are not reported for most cases. Anything you leave
-            blank is recorded as not measured — the model is trained on records
-            with the same gaps.
+            Most of these are not reported for most mutations. Anything you
+            leave blank is recorded as not measured — the model was fitted on
+            mutations with the same gaps.
           </p>
           {showOptional && (
             <div className="mt-4 space-y-6">
@@ -362,6 +377,9 @@ const PredictionForm: React.FC<{ patientId: number; onPredicted?: () => void }> 
           <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">
             {result.interpretation}
           </p>
+          <div className="mt-2">
+            <MutationLevelNote />
+          </div>
           <Link
             to={`/explanations/${result.id}`}
             className="inline-block mt-3 text-sm text-purple-600 dark:text-purple-400 hover:underline"

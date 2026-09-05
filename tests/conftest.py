@@ -12,9 +12,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from ml.artifacts import available_versions  # noqa: E402
-from ml.inference import FEATURE_SET_VERSIONS, PredictionService  # noqa: E402
+from ml.inference import (  # noqa: E402
+    DEFAULT_MODEL_VERSION,
+    FEATURE_SET_VERSIONS,
+    PredictionService,
+)
 
-MODEL_VERSION = "mmc-merged-v1"
+#: Taken from the inference module rather than written out, so renaming the
+#: served artifact cannot silently skip the whole suite.
+MODEL_VERSION = DEFAULT_MODEL_VERSION
 
 requires_model = pytest.mark.skipif(
     MODEL_VERSION not in available_versions(),

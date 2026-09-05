@@ -9,12 +9,13 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
-import { Disclaimer, RecordLevelNote } from '@/components/Disclaimer'
+import { Disclaimer, MutationLevelNote } from '@/components/Disclaimer'
 import PredictionForm from '@/components/PredictionForm'
 
 /**
  * One patient: their record, the inhibitor-risk input form, and the full
- * history of estimates made for them.
+ * history of estimates recorded against them. Each estimate describes the
+ * mutation that was entered, not the patient.
  */
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -93,8 +94,9 @@ const PatientDetail: React.FC = () => {
           <Dna className="w-4 h-4" /> New risk estimate
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Describe the F8 variant, the clinical record, or both. Options are
-          limited to values the model was actually trained on.
+          Describe the F8 mutation (MMC2), the clinical findings reported for
+          it (MMC3), or both. Options are limited to values the model was
+          actually fitted on.
         </p>
         <PredictionForm patientId={patientId} onPredicted={refresh} />
       </section>
@@ -103,7 +105,7 @@ const PatientDetail: React.FC = () => {
         <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white mb-1">
           <History className="w-4 h-4" /> Prediction history
         </h2>
-        <RecordLevelNote />
+        <MutationLevelNote />
 
         {history.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">

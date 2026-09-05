@@ -37,7 +37,7 @@ bcrypt's 72-byte limit).
 | DELETE | `/api/patients/{id}` | 204. Cascades to case records, predictions and explanations. |
 
 A patient record holds identity only. No clinical variables are stored on it,
-because the predictive input — the mutation description and the clinical record —
+because the predictive input — the mutation description and its clinical record —
 is submitted with the prediction.
 
 ## Predictions
@@ -48,9 +48,9 @@ Three models are served, matching the feature blocks of the reference analysis:
 
 | `feature_set` | Model version | Input |
 |---|---|---|
-| `genomic` | `mmc-genomic-v1` | 20 MMC2 mutation columns |
-| `clinical` | `mmc-clinical-v1` | 9 MMC3 clinical columns |
-| `merged` | `mmc-merged-v1` | all 29 (**default**) |
+| `genomic` | `mmc2-genomic-v1` | 14 MMC2 mutation fields |
+| `clinical` | `mmc3-clinical-v1` | 6 MMC3 clinical fields, aggregated per mutation |
+| `merged` | `mmc2-mmc3-v1` | all 20 fields, fused (**default**) |
 
 The default is set by `ML_DEFAULT_FEATURE_SET`; a request may choose any mode
 that loaded.
@@ -62,7 +62,7 @@ Optional query parameter `feature_set`.
 
 ```json
 {
-  "model_version": "mmc-merged-v1",
+  "model_version": "mmc2-mmc3-v1",
   "feature_set": "merged",
   "available_feature_sets": ["genomic", "clinical", "merged"],
   "default_feature_set": "merged",
@@ -141,7 +141,7 @@ never reaches the model.
   "probability": 0.093977,
   "risk_category": "Lower estimated risk",
   "threshold": 0.24532813727855682,
-  "model_version": "mmc-merged-v1",
+  "model_version": "mmc2-mmc3-v1",
   "feature_set": "merged",
   "preprocessing_version": "mmc-preprocessing-1",
   "created_at": "2026-09-03 10:31:46",
@@ -196,7 +196,7 @@ was fitted on:
 ```json
 {
   "feature_set": "merged",
-  "unit_of_explanation": "One clinical record of an F8 mutation, as recorded in MMC3. ...",
+  "unit_of_explanation": "One F8 mutation: its MMC2 genomic description together with the aggregate of the MMC3 clinical records reporting it. ...",
   "shap": {
     "available": true,
     "basis": "uncalibrated ensemble",
@@ -233,7 +233,7 @@ Nothing is synthesised, and `mean_probability` is `null` when there are none.
   "risk_distribution": { "Lower estimated risk": 2 },
   "mutation_type_distribution": { "Point": 1, "Not supplied": 1 },
   "feature_set_distribution": { "merged": 1, "clinical": 1 },
-  "model_version": "mmc-merged-v1"
+  "model_version": "mmc2-mmc3-v1"
 }
 ```
 

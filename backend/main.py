@@ -33,20 +33,21 @@ logger = logging.getLogger(__name__)
 
 DESCRIPTION = """
 Explainable Hemophilia A inhibitor-risk prediction, built on the **MMC2 +
-MMC3** Hemophilia A tables joined on `mut_id`. The target is MMC3's
-`Inhibitors` field (Yes = 1, No = 0).
+MMC3** Hemophilia A tables fused on `mut_id`. MMC2 supplies the genomic
+description of the mutation, MMC3 the clinical records reported for it and the
+target — MMC3's `Inhibitors` field (Yes = 1, No = 0). MMC3's records are
+aggregated per mutation, so the unit of prediction is one **F8 mutation**.
 
-Three prediction modes are served, matching the feature blocks of the reference
-analysis:
+Three prediction modes are served, one per feature block:
 
-* `genomic` — the MMC2 mutation description
-* `clinical` — the MMC3 clinical record
-* `merged` — both (the default; it discriminates best)
+* `genomic` — the MMC2 mutation description alone
+* `clinical` — the aggregated MMC3 clinical record alone
+* `merged` — both, fused (the default; it discriminates best)
 
-**This is a research prototype.** Estimates are attributed to a *reported
-record*, not to an individual patient, are not clinically validated, and must
-not be used for standalone diagnosis or treatment decisions. The API never
-recommends a course of treatment.
+**This is a research prototype.** An estimate is attributed to a *mutation* as
+the source literature reports it, not to an individual patient. It is not
+clinically validated and must not be used for standalone diagnosis or treatment
+decisions. The API never recommends a course of treatment.
 """
 
 

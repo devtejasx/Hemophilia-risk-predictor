@@ -252,8 +252,9 @@ class ExplanationService:
             "model_version": self.bundle.version,
             "feature_set": self.spec.name,
             "unit_of_explanation": (
-                "One clinical record of an F8 mutation, as recorded in MMC3. "
-                "Contributions describe the model's use of that record's "
+                "One F8 mutation: its MMC2 genomic description together with the "
+                "aggregate of the MMC3 clinical records reporting it. "
+                "Contributions describe the model's use of that mutation's "
                 f"{self.spec.name} features, not an individual patient's future."
             ),
         }

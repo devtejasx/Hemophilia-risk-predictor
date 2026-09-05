@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import db
+from ml.inference import FEATURE_SET_VERSIONS
 from tests.conftest import MODEL_VERSION, requires_model
 
 pytestmark = requires_model
@@ -300,6 +301,39 @@ def test_non_numeric_number_returns_422(client, auth, patient_id):
     assert response.status_code == 422
 
 
+def test_a_censored_measurement_is_accepted_and_stored_verbatim(
+    client, auth, patient_id
+):
+    """'<1' is a real FVIII reading, not a typo, and the API must take it.
+
+    The source tables report assays as bounds and ranges below or above the
+    limit of detection, so a caller may write them the same way. The service
+    parses the value and its censoring with the same parser training used, so
+    the request succeeds — and the stored record keeps the string that was
+    actually sent, rather than a silently coerced number that would erase the
+    fact that the reading was censored.
+    """
+    schema = client.get("/api/predictions/schema", headers=auth).json()
+    assert schema["numeric"]["clotting"]["accepts_censored"] is True
+
+    payload = _case(client, auth, clotting="<1")
+    response = client.post(
+        f"/api/patients/{patient_id}/predictions", json=payload, headers=auth
+    )
+    assert response.status_code == 201, response.text
+
+    body = response.json()
+    assert body["features"]["clotting"] == "<1"
+    assert 0.0 <= body["probability"] <= 1.0
+
+    # And it survives a round trip: the stored row still transforms, so an
+    # explanation of it does not 409 on its own censored input.
+    explanation = client.get(
+        f"/api/predictions/{body['id']}/explanation", headers=auth
+    )
+    assert explanation.status_code == 200, explanation.text
+
+
 def test_no_prediction_is_stored_when_input_is_invalid(client, auth, patient_id):
     client.post(
         f"/api/patients/{patient_id}/predictions",
@@ -369,13 +403,23 @@ def test_prediction_response_carries_the_documented_fields(client, auth, patient
 def test_every_prediction_mode_answers_from_its_own_model(
     client, auth, patient_id, feature_set
 ):
+    """Each mode must answer from its own artifact, not from the default one.
+
+    The expected version is read from the inference registry rather than
+    written out here, so a retrain that renames an artifact updates the
+    expectation in one place — but the mapping mode -> artifact is still
+    asserted, which is the guarantee: a genomic request must not be quietly
+    served by the fused model.
+    """
     body = client.post(
         f"/api/patients/{patient_id}/predictions",
         json=_case(client, auth, feature_set=feature_set),
         headers=auth,
     ).json()
     assert body["feature_set"] == feature_set
-    assert body["model_version"] == f"mmc-{feature_set}-v1"
+    assert body["model_version"] == FEATURE_SET_VERSIONS[feature_set]
+    # Distinct modes are distinct artifacts, so no two share a version.
+    assert len(set(FEATURE_SET_VERSIONS.values())) == len(FEATURE_SET_VERSIONS)
 
 
 def test_a_stored_prediction_can_be_read_back_and_explained(client, auth, patient_id):
@@ -397,17 +441,40 @@ def test_a_stored_prediction_can_be_read_back_and_explained(client, auth, patien
         assert item["supplied"] == (item["feature"] in created["features"])
 
 
-def test_an_explanation_never_names_a_champ_feature(client, auth, patient_id):
+def test_an_explanation_only_names_fields_the_served_model_accepts(
+    client, auth, patient_id
+):
+    """An explanation may name a field only if the served schema offers it.
+
+    This is the guarantee that a blocklist of retired column names used to
+    approximate: an explanation must never attribute the probability to
+    something the caller cannot supply — a column from a superseded schema, a
+    derived aggregate such as ``clotting_mean``, or an encoded name such as
+    ``cat__mut_type_Point``. Taking the accepted set from the served schema
+    means the check follows whatever the model is actually fitted on instead of
+    a hand-written list that goes stale on the next retrain.
+    """
+    schema = client.get("/api/predictions/schema", headers=auth).json()
+    accepted = set(schema["labels"])
+    assert accepted == set(schema["required"]) | set(schema["optional"])
+    # The model consumes aggregates of those fields, so naming a model feature
+    # would be a real failure rather than a vacuous one.
+    assert set(schema["model_features"]) - accepted
+
     created = client.post(
         f"/api/patients/{patient_id}/predictions", json=_case(client, auth), headers=auth
     ).json()
     explanation = client.get(
         f"/api/predictions/{created['id']}/explanation", headers=auth
     ).json()
-    retired = {"Variant Type", "Mechanism", "Domain", "Subtype", "In Poly A"}
     for method in ("shap", "lime"):
-        for item in explanation[method]["contributions"]:
-            assert item["feature"] not in retired
+        contributions = explanation[method]["contributions"]
+        assert contributions, f"{method} explained nothing: {explanation[method]}"
+        for item in contributions:
+            assert item["feature"] in accepted, (
+                f"{method} named '{item['feature']}', which is not a field of "
+                f"the '{schema['feature_set']}' input schema"
+            )
 
 
 def test_a_user_cannot_explain_another_users_prediction(client, auth, patient_id):

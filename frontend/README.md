@@ -1,228 +1,158 @@
-# Hemophilia AI Frontend
+# Hemophilia A Inhibitor-Risk Frontend
 
-Modern React-based clinical decision support system for hemophilia risk prediction and management.
+React + TypeScript UI for the Hemophilia A inhibitor-risk research prototype.
+It collects a description of an F8 mutation, asks the backend for an estimate,
+and shows the SHAP/LIME attribution behind that estimate.
 
-## Quick Start
+> Research prototype. Nothing here is intended for standalone diagnosis or
+> treatment decisions.
 
-### Prerequisites
-- Node.js 16+ 
-- npm or yarn
+## What the system actually models
 
-### Installation
+The unit of analysis is a **mutation**, not a patient and not a single clinical
+record.
+
+- **MMC2** is the genomic table: one row per mutation, describing its type,
+  effect, location, exon/intron, codon and nucleotide position.
+- **MMC3** is the clinical table: one row per clinical record, carrying the
+  assay values and the reported inhibitor outcome. Several records may report
+  the same mutation.
+
+The two are joined on the mutation id and aggregated into **one row per
+mutation**, so an estimate says how often that mutation is reported alongside an
+inhibitor in the source literature. It is not an individual patient's
+probability of developing an inhibitor, and the UI says so on every screen that
+shows a number (`MutationLevelNote` in `src/components/Disclaimer.tsx`).
+
+Mutations whose clinical records disagree about the outcome are excluded
+upstream, in the ML pipeline.
+
+## Prediction modes
+
+The mode picker on the prediction form offers whatever
+`GET /api/predictions/schema` reports as available:
+
+| Mode | Source | Use it when |
+| --- | --- | --- |
+| `merged` | MMC2 + MMC3 fused at the mutation level | You have both the mutation description and the clinical findings. This is the served default. |
+| `genomic` | MMC2 only | You have only the mutation description, e.g. before any assay result is back. |
+| `clinical` | MMC3 only | You have only the reported clinical findings and assay values. |
+
+Which mode is the default is read from the schema response
+(`default_feature_set`) rather than hardcoded, and the model artifact version is
+read from `model_version`. Neither is duplicated in the UI copy.
+
+## The prediction form is schema-driven
+
+`src/components/PredictionForm.tsx` hardcodes **no field list**. For the chosen
+mode the backend reports which fields the fitted model accepts, a human-readable
+label for each, whether it belongs to the genomic or clinical block, whether it
+is required, and which values it was fitted on. Consequences:
+
+- The UI cannot offer a value the model has never seen.
+- A retrained model with different columns needs no frontend change.
+- Fields marked `open_vocabulary` (HGVS notation, an activity reading) render as
+  free text with the known values as suggestions, because a mutation you are
+  describing may carry a notation the model has not seen. Everything else is a
+  strict `<select>`.
+- A field left blank is omitted from the request rather than sent as `""`, so
+  the model records it as not measured.
+
+Keep it that way. Do not reintroduce a static field list.
+
+## Quick start
 
 ```bash
-# Install dependencies
 npm install
 
-# Setup environment
-cp .env.example .env.local
-# Edit .env.local and set VITE_API_URL to your FastAPI backend URL
+cp .env.example .env
+# set VITE_API_URL if the backend is not on http://localhost:8000/api
+
+npm run dev        # http://localhost:3000, /api proxied to :8000
 ```
 
-### Development
+Other scripts:
 
 ```bash
-# Start dev server on http://localhost:3000
-npm run dev
+npm run build       # tsc && vite build -> dist/
+npm run preview     # serve the built bundle
+npm run lint        # eslint, zero warnings tolerated
+npm run type-check  # tsc --noEmit
 ```
 
-### Build
-
-```bash
-# Build for production
-npm run build
-
-# Preview built app
-npm run preview
-```
-
-## Project Structure
+## Project structure
 
 ```
 src/
-├── components/        # Reusable UI components
-│   ├── Navbar.tsx
-│   ├── Sidebar.tsx
-│   ├── MetricCard.tsx
-│   ├── PatientCard.tsx
-│   ├── ChatBox.tsx
-│   ├── FormField.tsx
-│   └── Charts.tsx
-├── pages/            # Page components
-│   ├── Dashboard.tsx
-│   ├── AddPatient.tsx
-│   ├── Predictions.tsx
-│   ├── SHAPAnalysis.tsx
-│   ├── Chatbot.tsx
-│   └── Analytics.tsx
-├── services/         # API integration
-│   ├── api.ts        # Axios client
-│   └── api-client.ts # API methods
-├── store/            # State management (Zustand)
-│   └── appStore.ts
-├── styles/           # Global styles
-│   └── index.css
-├── App.tsx           # Main app with routing
-└── main.tsx          # Entry point
+├── components/
+│   ├── Disclaimer.tsx      # research-prototype banner + MutationLevelNote
+│   ├── MetricCard.tsx      # dashboard KPI tile
+│   ├── PredictionForm.tsx  # schema-driven input form + mode picker
+│   ├── RiskBadge.tsx       # probability, band and the model's own threshold
+│   └── Sidebar.tsx         # nav, theme toggle, sign out
+├── pages/
+│   ├── Login.tsx           # sign in / register
+│   ├── Dashboard.tsx       # counts and recent patients
+│   ├── Patients.tsx        # patient list
+│   ├── AddPatient.tsx      # identity only; no clinical fields are collected here
+│   ├── PatientDetail.tsx   # prediction form + estimate history
+│   ├── Explanation.tsx     # SHAP and LIME attribution for one estimate
+│   └── Analytics.tsx       # global feature importance and your own distributions
+├── services/
+│   ├── api.ts              # axios instance, auth interceptor, error formatting
+│   └── api-client.ts       # typed endpoint wrappers; mirrors backend/schemas.py
+├── store/appStore.ts       # zustand: user, theme, patient list
+├── styles/index.css        # Tailwind entry
+├── App.tsx                 # routes and the auth gate
+└── main.tsx
 ```
 
-## Features
+`AddPatient` deliberately collects identity only. An earlier version asked for
+around twenty clinical fields (blood type, joint damage score, adherence, HLA
+typing) that exist nowhere in the dataset and never reached the model.
 
-### 📊 Dashboard
-- Real-time KPI metrics
-- Risk distribution visualization
-- Trend analysis
-- Recent patients overview
+## Backend endpoints used
 
-### ➕ Add Patient
-- Multi-step form wizard
-- Demographics, clinical, treatment, and history sections
-- Form validation
-- Patient database integration
+All are relative to `VITE_API_URL`. A `401` clears the stored token and bounces
+to `/login`.
 
-### 🧠 Risk Predictions
-- Interactive patient data input
-- ML-based inhibitor risk prediction
-- Feature importance visualization
-- Clinical recommendations
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /auth/register`, `POST /auth/login`, `GET /auth/me` | Authentication |
+| `GET/POST /patients`, `GET/DELETE /patients/{id}` | Patient records |
+| `GET /predictions/schema?feature_set=` | Fields, labels and allowed values per mode |
+| `POST /patients/{id}/predictions` | Run an estimate |
+| `GET /predictions/{id}`, `GET /patients/{id}/history` | Read estimates back |
+| `GET /predictions/{id}/explanation` | SHAP and LIME attribution |
+| `GET /explanations/global` | Model-wide feature importance |
+| `GET /analytics` | Counts and distributions |
 
-### 📈 SHAP Analysis
-- Model explainability with SHAP values
-- Multiple view modes (Basic, Advanced, Detailed)
-- Feature contribution breakdown
-- Clinical guidance
+`src/services/api-client.ts` mirrors `backend/schemas.py`. Keep the two in step.
 
-### 💬 Chatbot
-- Clinical question answering
-- Multiple conversation modes
-- Treatment planning assistance
-- Educational content
+## Copy rules
 
-### 📉 Analytics
-- Comprehensive patient cohort analysis
-- Advanced filtering and sorting
-- Risk distribution charts
-- Data export (CSV)
+Two rules apply to anything user-visible in this app:
 
-## Tech Stack
+1. **No performance numbers in UI copy.** No ROC-AUC, PR-AUC, precision, recall,
+   F1, Brier, accuracy, row counts or feature counts, and no informal stand-in
+   for one ("discriminates best", "highly accurate"). Metrics come from a real
+   training run and live in the ML documentation, not in a blurb.
+2. **Mutation framing, not patient framing.** An estimate describes a mutation
+   as the source literature reports it. Never word it as an individual patient's
+   future risk.
 
-- **React 18** - UI framework
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling with dark mode
-- **React Router v6** - Client routing
-- **Axios** - HTTP client
-- **Recharts** - Data visualization
-- **Zustand** - State management
-- **TypeScript** - Type safety
-- **Lucide React** - Icons
+## Tech stack
 
-## Environment Variables
-
-Create `.env.local`:
-
-```env
-VITE_API_URL=http://localhost:8000/api
-```
-
-## API Requirements
-
-The backend should provide:
-
-- `POST /api/predict` - Risk prediction endpoint
-- `POST /api/chat` - Chatbot endpoint
-- `GET /api/patients` - Patient list
-- `POST /api/patients` - Create patient
-- `GET /api/analytics/dashboard` - Analytics data
-- `GET /api/analytics/risk-distribution` - Risk metrics
-- `GET /api/analytics/severity-distribution` - Severity metrics
-
-## Development
-
-### Code Style
-- ESLint for linting
-- TypeScript for type checking
-- Tailwind CSS for styling
-
-### Component Patterns
-
-```typescript
-// Functional component with hooks
-const MyComponent: React.FC<Props> = ({ prop1 }) => {
-  const [state, setState] = useState<Type>(initialValue)
-  return <div>{state}</div>
-}
-```
-
-### State Management
-
-Use Zustand store for app-wide state:
-
-```typescript
-import { useAppStore } from '@/store/appStore'
-
-const { theme, setTheme } = useAppStore()
-```
-
-## Deployment
-
-### Vercel (Recommended)
-
-```bash
-# Push to GitHub, then:
-# Connect repo on Vercel dashboard
-# Set VITE_API_URL environment variable
-# Deploy
-```
-
-### Self-Hosted
-
-```bash
-npm run build
-# Serve dist/ folder with any static server
-```
-
-### Docker
-
-```bash
-docker build -t hemophilia-frontend .
-docker run -p 3000:3000 hemophilia-frontend
-```
+React 18, TypeScript, Vite, Tailwind (class-based dark mode), React Router v6,
+Axios, Zustand, Recharts, Lucide icons.
 
 ## Troubleshooting
 
-### API Connection Issues
-- Verify VITE_API_URL is correct
-- Check CORS settings on backend
-- Ensure backend is running on correct port
-
-### Build Errors
-- Delete `node_modules` and `dist`
-- Run `npm install` again
-- Check Node.js version (16+)
-
-### Dark Mode Not Working
-- Clear browser cache
-- Check localStorage for theme value
-- Verify Tailwind dark mode config
-
-## Performance
-
-- Code splitting with React Router
-- Image optimization
-- CSS minification via Tailwind
-- Build optimization with Vite
-
-## Browser Support
-
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
-
-## License
-
-Medical research - Proprietary
-
-## Support
-
-For issues and questions, contact the development team.
+- **Requests fail / CORS errors** — check `VITE_API_URL` and that the backend is
+  up on port 8000; in dev, `/api` is proxied by Vite.
+- **Signed out immediately** — the stored token expired; the interceptor clears
+  it and redirects to `/login`.
+- **The form says the model is unavailable** — `GET /predictions/schema` failed,
+  usually because no model artifact is loaded on the backend.
+- **Dark mode not applying** — `App.tsx` toggles `.dark` on `<html>` from the
+  stored theme; check `localStorage.theme` and the Tailwind `darkMode` config.

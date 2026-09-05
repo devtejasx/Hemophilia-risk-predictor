@@ -7,13 +7,14 @@
 ![Status](https://img.shields.io/badge/status-research%20prototype-8A5D0B)
 
 An explainable Hemophilia A inhibitor-risk prediction **research prototype**,
-built on the **MMC2 + MMC3** mutation and clinical-record tables.
+built on the **MMC2** (genomic) and **MMC3** (clinical) supplementary tables,
+fused on `mut_id` into **one row per mutation**.
 
 > **Medical disclaimer.** This is research decision-support software, not a
 > diagnostic device. It is **not clinically validated**, has no external
 > validation cohort, and must not be used for standalone diagnosis or treatment
 > decisions. It never recommends a course of treatment. Estimates are attributed
-> to a **reported record**, not to an individual patient — see
+> to a **reported mutation**, not to an individual patient — see
 > [Limitations](#limitations).
 
 ## Contents
@@ -39,11 +40,11 @@ built on the **MMC2 + MMC3** mutation and clinical-record tables.
 ## What it does
 
 A clinician signs in, records a patient, and describes that patient's F8
-mutation, their clinical record, or both. The application returns a calibrated
-probability that a record with that description reports inhibitor development,
-together with SHAP and LIME explanations of which mutation and clinical features
-drove the estimate. Predictions and explanations are stored and viewable as
-history.
+mutation, their clinical picture, or both. The application returns a calibrated
+probability that a **mutation** with that description is reported with an
+inhibitor, together with SHAP and LIME explanations of which genomic and
+clinical features drove the estimate. Predictions and explanations are stored
+and viewable as history.
 
 ## Architecture
 
@@ -73,9 +74,9 @@ history.
           │   records   │          └────────┬─────────┘
           │  predictions│                   ▼
           │  explanations│         ┌──────────────────┐
-          │  audit_logs │          │ mmc-genomic-v1   │
-          └─────────────┘          │ mmc-clinical-v1  │
-                                   │ mmc-merged-v1 ★  │
+          │  audit_logs │          │ mmc2-genomic-v1  │
+          └─────────────┘          │ mmc3-clinical-v1 │
+                                   │ mmc2-mmc3-v1 ★   │
                                    │ model + preproc  │
                                    │ + metadata       │
                                    └──────────────────┘
@@ -100,16 +101,32 @@ never modified; all interpretation happens in
 | Unique `mut_id` | 6,211 | 6,212 |
 | Repeated `mut_id` | 0 | 3,852 |
 
-They are joined on **`mut_id`**: MMC2 is reduced to one row per mutation, MMC3
-keeps every clinical record. **4,962 merged records over 2,639 unique
-mutations**, 836 positive (16.85%).
+They are fused on **`mut_id`** in two steps. MMC2 is reduced to one row per
+mutation and joined to MMC3; then every clinical record behind a mutation is
+**aggregated per `mut_id`**, so the modelling unit is the **mutation** — not the
+clinical record, and not the patient. A mutation reported by many records
+contributes one row rather than many near-identical rows carrying an identical
+genomic block, which is what keeps the evaluation from rewarding a model for
+memorising a frequently reported mutation.
+
+A mutation whose clinical records **disagree** about the inhibitor outcome has
+no single label. Those mutations are counted, reported and **excluded** from
+supervised training rather than resolved by a majority vote, which would
+manufacture a certainty the source data does not contain.
 
 `python scripts/validate_dataset.py` prints the full report — row counts,
-duplicates, missing values, the join outcome, the target distribution, and every
-resolved feature — before anything is fitted.
+duplicates, missing values, the join and aggregation outcome, the conflicting
+mutations, the target distribution, and every resolved feature — before anything
+is fitted. The post-fusion counts (mutations after the join, mutations excluded
+as conflicting, mutations carrying a usable label, positive rate) come from that
+report and from each artifact's `metadata.json`. Measured: **2,639** F8
+mutations carry a usable label and **3,566** carry none; **124** conflict and
+are excluded; the **final modelling population is 2,515 mutations — 496
+positive, 2,019 negative, a 19.72% positive rate.**
 
-Because one mutation can appear in up to 104 records, **`mut_id` is the grouping
-key for every split**. No mutation is allowed to appear in two partitions.
+Because aggregation leaves exactly one row per mutation, no mutation can appear
+in two partitions even in principle. **`mut_id` is still the grouping key for
+every split**, and the zero-overlap property is asserted anyway.
 
 ## Prediction target
 
@@ -120,49 +137,75 @@ Yes  ->  1
 No   ->  0
 ```
 
-Case- and whitespace-insensitive. Everything else — `Not reported` (2,090),
-blank (1,730), `Not` (1,276), and two records where a severity was typed into
-the field — is **excluded and counted, never imputed**. 4,966 records carry an
-explicit label; 836 of them are positive.
+Case- and whitespace-insensitive. Everything else — `Not reported`, blank,
+`Not`, and the records where a severity was typed into the field — is
+**excluded and counted, never imputed**.
 
-`Inhibitors` never appears as an input feature, and neither does `uinhibitor`,
-MMC2's curated inhibitor status, which reproduces the label almost exactly
-(97.1% positive when `Yes`) and is on the exclusion list as leakage.
+That label is then resolved **per mutation**, because the modelling unit is the
+mutation:
+
+```
+every labelled record reports an inhibitor  ->  1
+no labelled record reports one              ->  0
+the records disagree                        ->  excluded, counted, never voted on
+```
+
+`Inhibitors` never appears as an input feature, and neither do the columns that
+would leak it: `uinhibitor` (MMC2's curated inhibitor status, which reproduces
+the label almost exactly), `type` and `utype` (inhibitor kinetic type, recorded
+only when an assay was run), `assay` (which assay produced the reading),
+`pa_race` (the reporting country, which tracks which cohorts were published),
+and the free-text identifiers `mut_syn`, `aa_syn`, `aa_change` and
+`codon_change`, which name a mutation rather than describe it. The full list,
+with the reason for each, lives in `EXCLUDED_COLUMNS` in
+`ml/preprocessing/hemophilia_a.py` — in code, not only in documentation.
 
 ## Feature groups
 
 Three blocks, resolved from the columns that actually exist in the files. Each
 is a separately trained model and a selectable prediction mode.
 
-| Mode | Source | Columns |
-|---|---|---|
-| **Genomic** | MMC2 | 20 |
-| **Clinical** | MMC3 | 9 |
-| **Merged** | both | 29 — **the default** |
+| Mode | Source | Model version | Input columns |
+|---|---|---|---|
+| **Genomic** | MMC2 | `mmc2-genomic-v1` | 14 fields → 14 features |
+| **Clinical** | MMC3, aggregated per mutation | `mmc3-clinical-v1` | 6 fields → 33 features |
+| **Merged** | both | `mmc2-mmc3-v1` | 20 fields → 47 features — **the default** |
 
-Genomic: `mut_type`, `mut_effect`, `location`, `e_i_numb`, `locnumb`,
-`aa_numb_old`, `aa_numb`, `codon_change`, `codon_first`, `codon_last`, `n_bp`,
-`nuc_numb`, `ntchange`, `mut_syn`, `aa_change`, `aa_first`, `aa_last`, `aa_syn`,
-`CpG`, `utype`.
+Genomic — one value per mutation, straight from MMC2: `mut_type`, `mut_effect`,
+`location`, `e_i_numb`, `locnumb`, `aa_numb`, `codon_first`, `codon_last`,
+`n_bp`, `nuc_numb`, `ntchange`, `aa_first`, `aa_last`, `CpG`. The positional
+ones are parsed as measurements rather than one-hot encoded, because exon 14 is
+genuinely between exon 13 and exon 15.
 
-Clinical: `clotting`, `discrep`, `ratio`, `assay`, `antigen`, `act/ant`, `type`,
-`pa_race`, `cli_phe`.
+Clinical — summarised over every record behind the mutation: `clotting`,
+`antigen`, `ratio`, `act/ant` and `discrep`, each written as free text in the
+source (censored readings like `<1`, ranges like `1 to 5`) and therefore parsed
+into a value plus a censoring flag, then reduced to mean / median / min / max
+and a censored rate per mutation; and `cli_phe`, the severity phenotype, which
+contributes an ordinal score and the proportion of the mutation's records in
+each severity bucket.
 
-**Two candidate columns are dropped, and the reason is recorded rather than
-hidden:**
+**Candidate columns that are dropped, with the reason recorded in code rather
+than hidden:**
 
-- `mutations` — present in *both* tables, so the join renames it to
-  `mutations_clinical` / `mutations_genomic` and the candidate column does not
-  exist in the merged frame.
-- `bleed_tool`, `bleed_score` — present but 100% null across all 4,962 merged
-  records.
+- `mutations` — a single constant value for every merged record, so it carries
+  nothing.
+- `bleed_tool`, `bleed_score` — present in the file but effectively empty.
+- `aa_numb_old` — the pre-2001 amino-acid numbering of `aa_numb`, differing
+  only by the signal-peptide offset.
+- `Count_mut_id`, `n_clinical_records` — how many records mention a mutation.
+  A reporting artifact, and after conflicting mutations are excluded it encodes
+  the exclusion rule rather than biology.
 
-Both match the reference notebook's own `valid_features` filter.
+Every one of these, and every leakage exclusion above, sits in
+`EXCLUDED_COLUMNS` with its justification, so the reason travels with the
+pipeline instead of living only on this page.
 
 ## ML pipeline and results
 
 ```
 MMC2 + MMC3 → validate → filter F8 → encode target → merge on mut_id
+     → AGGREGATE per mut_id (one row per mutation, conflicting ones excluded)
      → GROUPED SPLIT on mut_id (no mutation crosses a boundary)
      → fit preprocessor on TRAIN ONLY
      → model selection, StratifiedGroupKFold(5) on mut_id
@@ -172,11 +215,13 @@ MMC2 + MMC3 → validate → filter F8 → encode target → merge on mut_id
      → save artifact → serve → SHAP / LIME
 ```
 
-| | Records | Mutations | Positive |
-|---|---|---|---|
-| Training | 3,124 | 1,688 | 525 |
-| Validation | 812 | 423 | 142 |
-| Test | 1,026 | 528 | 169 |
+One row is one mutation, so the split table counts mutations and nothing else:
+
+| | Mutations | Positive |
+|---|---|---|
+| Training | 1,609 | 318 |
+| Validation | 403 | 76 |
+| Test | 503 | 102 |
 
 Overlapping mutations between any two splits: **0**, asserted at training time
 and again by the test suite.
@@ -185,29 +230,35 @@ Held-out test set, produced by `scripts/train_inhibitor_model.py`:
 
 | Metric | Genomic | Clinical | **Merged** |
 |---|---|---|---|
-| Accuracy | 0.7982 | 0.8265 | **0.8012** |
-| Precision | 0.4087 | 0.4587 | **0.4229** |
-| Recall (sensitivity) | 0.5030 | 0.2959 | **0.5680** |
-| Specificity | 0.8565 | 0.9312 | **0.8471** |
-| F1 | 0.4509 | 0.3597 | **0.4848** |
-| ROC-AUC | 0.7327 | 0.7156 | **0.7646** |
-| PR-AUC | 0.3911 | 0.4144 | **0.4754** |
-| Brier | 0.1220 | 0.1182 | **0.1126** |
+| Accuracy | 0.6123 | 0.7773 | **0.7416** |
+| Precision | 0.3232 | 0.4286 | **0.4167** |
+| Recall (sensitivity) | 0.8333 | 0.2941 | **0.6863** |
+| Specificity | 0.5561 | 0.9002 | **0.7556** |
+| F1 | 0.4658 | 0.3488 | **0.5185** |
+| ROC-AUC | 0.7793 | 0.7380 | **0.7998** |
+| PR-AUC | 0.4850 | 0.3991 | **0.5042** |
+| Brier | 0.1331 | 0.1402 | **0.1296** |
 
-Merged confusion matrix at threshold 0.245: TN 726, FP 131, FN 73, TP 96.
+Merged confusion matrix at the operating threshold (0.2384): TN 303, FP 98, FN 32, TP 70.
 
-**Read this honestly.** The merged model's PR-AUC of 0.475 against a 0.165 base
-rate is a 2.9× lift — real signal, and combining both blocks genuinely beats
-either alone on every ranking metric. But at the operating threshold it flags
-227 records to catch 96 of 169 true positives: more than one false alarm per
-true one, and it still misses 73. It is a screening aid that errs toward
-sensitivity, not a decision rule. Accuracy is deliberately not the headline:
-answering "no inhibitor" for everything scores 0.835 here and is useless — which
-is exactly how the clinical-only model wins on accuracy while having the worst
-recall of the three.
+> Every number above is copied from the artifacts' own `metrics.json`,
+> produced by a real run of `scripts/train_inhibitor_model.py` (seed 42).
+> Nothing is typed by hand or carried over from an earlier pipeline.
+>
+> **The fused model beats both single-source models on ROC-AUC and PR-AUC**
+> — ROC-AUC 0.7998 against 0.7793 (genomic) and 0.7380 (clinical),
+> PR-AUC 0.5042 against 0.4850 and 0.3991. That is the point of the fusion.
 
-Full detail, including the model comparison, the preprocessing, the deviations
-from the reference notebook and every caveat: **[docs/ML.md](docs/ML.md)**.
+**Read this honestly.** Read PR-AUC against the positive rate rather than
+reading accuracy. PR-AUC 0.5042 against a 20.3% base rate is a 2.5× lift — real
+signal. But at the operating threshold the fused model flags 168 mutations to
+catch 70 of 102 true positives: more false alarms than true ones, and it still
+misses 32. Answering "no inhibitor" for every mutation would score 0.797
+accuracy here — more than the clinical-only model (0.777) manages by trying.
+It is a screening aid that errs toward sensitivity, not a decision rule.
+
+Full detail — the model comparison, the preprocessing, the censored-value
+parsing, the leakage exclusions and every caveat: **[docs/ML.md](docs/ML.md)**.
 
 ## Explainability
 
@@ -279,7 +330,7 @@ end to end:
 # 1. What is in the files, before anything is fitted
 python scripts/validate_dataset.py            # add --json for machine output
 
-# 2. Merge, split, train, evaluate, save (all three feature sets)
+# 2. Merge, aggregate, split, train, evaluate, save (all three feature sets)
 python scripts/train_inhibitor_model.py
 
 # ...or one at a time
@@ -288,9 +339,11 @@ python scripts/train_inhibitor_model.py --seed 7 --version-suffix v2
 ```
 
 `train_inhibitor_model.py` prints the source reports, the merge report, the
-grouped split with its overlap counts, the leakage probe, the cross-validation
+aggregation report with the mutations it excluded as conflicting, the grouped
+split with its overlap counts, the leakage probe, the cross-validation
 comparison and the held-out test metrics, then writes
-`ml/artifacts/mmc-<set>-v1/` (model, preprocessor, background sample,
+`ml/artifacts/mmc2-genomic-v1/`, `ml/artifacts/mmc3-clinical-v1/` and
+`ml/artifacts/mmc2-mmc3-v1/` (model, preprocessor, background sample,
 `metadata.json`, `metrics.json`) plus `ml/artifacts/training_summary.json`.
 
 Everything in `metrics.json` comes from that run. Nothing is hand-edited.
@@ -308,7 +361,7 @@ cd frontend && npm run dev
 ```
 
 Open http://localhost:3000, create an account, add a patient, choose a
-prediction mode, and describe the mutation and/or the clinical record.
+prediction mode, and describe the mutation and/or its clinical readings.
 `GET /health` reports database and model status for every mode.
 
 Retraining is optional — all three artifacts are committed.
@@ -319,9 +372,11 @@ Retraining is optional — all three artifacts are committed.
 pytest
 ```
 
-161 tests: dataset loading, the join on `mut_id`, target encoding and its
-exclusions, feature resolution, preprocessing and feature ordering, grouped-split
-leakage, artifact consistency, inference, thresholding, input validation,
+230 tests: dataset loading, the join on `mut_id`, censored-measurement parsing,
+mutation-level aggregation and the exclusion of conflicting mutations, target
+encoding and its exclusions, feature resolution, the identifier guard,
+preprocessing and feature ordering, grouped-split leakage, train/serve
+consistency, artifact consistency, inference, thresholding, input validation,
 SHAP/LIME, the API contract for all three modes, authentication, authorisation,
 the database migration, failure handling, and end-to-end tests that walk
 input → API → preprocessing → model → prediction → explanation → database →
@@ -370,14 +425,14 @@ curl -X POST http://localhost:8000/api/patients/1/predictions \
   -d '{"feature_set":"merged","features":{
         "mut_type":"Point","mut_effect":"Missense","location":"Exon",
         "e_i_numb":"14","locnumb":"14","n_bp":"1","nuc_numb":"1834",
-        "mut_syn":"c.1834C>T","cli_phe":"Severe",
-        "aa_numb_old":593,"aa_numb":612}}'
+        "ntchange":"C>T","aa_numb":612,
+        "cli_phe":"Severe","clotting":"<1"}}'
 ```
 
 ```json
-{ "prediction": 0, "risk": "Low", "probability": 0.093977,
-  "risk_category": "Lower estimated risk", "threshold": 0.2453,
-  "model_version": "mmc-merged-v1", "feature_set": "merged" }
+{ "prediction": 0, "risk": "Low", "probability": 0.198477,
+  "risk_category": "Lower estimated risk", "threshold": 0.2384,
+  "model_version": "mmc2-mmc3-v1", "feature_set": "merged" }
 ```
 
 The accepted keys are not hardcoded anywhere in the API layer — call
@@ -393,55 +448,60 @@ backend/             one FastAPI application
   core/              config, security
   routers/           auth, patients, predictions, analytics
   services/ml.py     adapter over the ml package; one service per mode
-  db.py              the single SQLite layer, incl. the CHAMP-era migration
+  db.py              the single SQLite layer; its migration renames a superseded
+                     schema's tables aside (legacy_pre_mmc_*) with data intact
 ml/
   data/              BVTH_VTH-2024-000215-mmc2.csv + …-mmc3.csv
-  preprocessing/hemophilia_a.py   load, validate, merge, feature sets, transformer
+  preprocessing/hemophilia_a.py   load, validate, merge, aggregate per mutation,
+                                  feature sets, transformer
   explainability/    SHAP + LIME
   artifacts/
-    mmc-genomic-v1/  mmc-clinical-v1/  mmc-merged-v1/
-    legacy-synthetic-v0/   preserved for provenance; see its PROVENANCE.md
+    mmc2-genomic-v1/  mmc3-clinical-v1/  mmc2-mmc3-v1/  (nothing else is servable)
   inference.py       the single predict() entrypoint
 scripts/
   validate_dataset.py         dataset report, exits non-zero on a bad file
-  train_inhibitor_model.py    merge -> split -> train -> evaluate -> save
-tests/               161 tests, including end-to-end
+  train_inhibitor_model.py    merge -> aggregate -> split -> train -> evaluate -> save
+tests/               230 tests, including end-to-end
 docker/              Dockerfiles, compose, nginx
-docs/                AUDIT.md · CANONICAL.md · ML.md · API.md
-archive/             superseded implementations, kept for reference
-  legacy-champ/      the retired CHAMP dataset, preprocessor, script and model
+docs/                CANONICAL.md · ML.md · API.md
+archive/             superseded implementations, kept for provenance; nothing
+                     here is imported, served or maintained
 ```
 
 ## Limitations
 
-1. **Record-level, not patient-level.** A row is one reported clinical record;
-   several records may describe the same mutation. The output is attributable to
-   that description, not to an individual's future.
-2. **Reporting bias.** 5,098 of 10,064 MMC3 records (51%) are excluded for
-   having no explicit Yes/No inhibitor value, almost certainly non-randomly —
-   records from inhibitor-focused work are likelier to have the field filled.
-   The 16.8% positive rate describes this dataset's reporting, not population
-   incidence.
-3. **`pa_race` ranks second in global importance and is 58.7% missing.** What it
-   most likely encodes is which cohorts were studied and reported, not a
-   biological effect. It is retained because the reference analysis's clinical
-   block includes it; no causal reading of it is defensible.
-4. **Repeated genomic blocks.** Every record of one mutation carries an
-   identical genomic block, so the training split contains 1,688 independent
-   mutations behind its 3,124 rows.
+1. **Mutation-level, not patient-level.** A row is one F8 mutation as reported
+   in the literature behind MMC3, not a person. The output describes how often
+   that mutation is reported with an inhibitor, not an individual's future.
+2. **Reporting bias.** Roughly half of MMC3's records are excluded for having no
+   explicit Yes/No inhibitor value, almost certainly non-randomly — records from
+   inhibitor-focused work are likelier to have the field filled. The positive
+   rate describes this dataset's reporting, not population incidence.
+3. **Excluding conflicting mutations is not free.** A mutation whose records
+   disagree is dropped rather than voted on, which is the honest choice but
+   removes exactly the ambiguous cases a clinician would most want help with.
+   The surviving multi-record mutations are unanimous by construction.
+4. **Reporting artifacts are excluded, and so is their signal.** `pa_race` (the
+   reporting country, which largely repeats the reporting laboratory) and the
+   per-mutation record counts predict the label in this file, but they encode
+   which cohorts were published rather than biology, so the model never sees
+   them. Nothing recovers whatever real effect they may have been standing in
+   for.
 5. **No external validation.** One dataset, one grouped split. **No clinical
    validation is claimed.**
-6. **Modest discrimination.** ROC-AUC 0.765 with 42% precision at the operating
-   threshold. Useful for screening, not for deciding.
-7. **Model choice is weakly evidenced.** The four candidate families sit within
-   roughly one standard deviation of each other in cross-validation.
+6. **Modest discrimination.** ROC-AUC 0.7998 with 42% precision at
+   the operating threshold. Useful for screening, not for deciding.
+7. **Model choice is weakly evidenced.** CatBoost and random forest are within
+   0.005 ROC-AUC of each other on the merged block — well inside one standard
+   deviation — and six of the eight candidate families sit inside that band.
 
 ## Repository history
 
 This repository previously contained four competing application stacks, three
 non-importing FastAPI backends, four Streamlit UIs, five chatbot
-implementations, and around 100 aspirational markdown documents. A full audit is
-in **[docs/AUDIT.md](docs/AUDIT.md)**; the resulting canonical choices are in
+implementations, and around 100 aspirational markdown documents. The audit that
+untangled it is archived under `archive/` alongside the pipeline it describes;
+the canonical choices that came out of it are in
 **[docs/CANONICAL.md](docs/CANONICAL.md)**.
 
 Two findings worth knowing:
@@ -449,17 +509,20 @@ Two findings worth knowing:
 - **The models committed before the audit were never trained on a real dataset.**
   They were fitted on 30 fabricated rows whose label was a deterministic function
   of two input columns. They are preserved, unmodified and clearly labelled, in
-  `ml/artifacts/legacy-synthetic-v0/` and are not servable.
+  `archive/legacy-artifacts/legacy-synthetic-v0/`. They were moved out of
+  `ml/artifacts/` during this migration, so they are no longer a loadable model
+  version at all.
 - **`hemophilia_clinic.db` was committed to git** containing four accounts that
   shared the unsalted MD5 of `password123`. The file is now untracked, but
   untracking does not remove it from git history: those accounts should be
   treated as compromised.
 
-The CHAMP pipeline that preceded this one was moved to `archive/legacy-champ/`
-with `git mv`, so history follows each file. Its metrics are not comparable to
-the ones on this page and must not be quoted for the current model — see
-[archive/legacy-champ/README.md](archive/legacy-champ/README.md). Nothing was
-deleted.
+Every superseded implementation was moved into `archive/` with `git mv`, so
+history follows each file and nothing was deleted. Only what this page describes
+is live: the MMC2 + MMC3 fusion, aggregated per mutation, behind one FastAPI
+application and one React UI. Metrics produced by any earlier pipeline describe
+a different dataset and a different modelling unit, and must never be quoted for
+the current models.
 
 ## License
 

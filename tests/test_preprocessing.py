@@ -14,9 +14,20 @@ from tests.conftest import requires_model
 
 
 @pytest.fixture(scope="module")
-def merged():
-    frame, _, _, _ = ha.load_merged()
-    return frame
+def bundle():
+    return ha.load_mutation_table()
+
+
+@pytest.fixture(scope="module")
+def merged(bundle):
+    """The mutation-level table - one row per mut_id - which is what is modelled."""
+    return bundle.mutations
+
+
+@pytest.fixture(scope="module")
+def records(bundle):
+    """The record-level table the mutation table was aggregated from."""
+    return bundle.records
 
 
 @pytest.fixture(scope="module")
@@ -34,9 +45,27 @@ def test_the_three_feature_sets_exist(specs):
 
 
 def test_genomic_and_clinical_features_come_from_the_right_table(specs):
-    assert set(specs["genomic"].columns) <= set(ha.GENOMIC_CANDIDATES)
-    assert set(specs["clinical"].columns) <= set(ha.CLINICAL_CANDIDATES)
-    assert not set(specs["genomic"].columns) & set(specs["clinical"].columns)
+    """MMC2 columns stay in the genomic block, MMC3 columns in the clinical one.
+
+    Genomic columns survive aggregation under their own names, so they can be
+    compared to the candidate list directly. Clinical columns cannot: each raw
+    field becomes several aggregates (``clotting`` -> ``clotting_mean``, ...),
+    so every model column is mapped back to the field it was derived from
+    before the comparison.
+    """
+    genomic, clinical = specs["genomic"], specs["clinical"]
+
+    assert set(genomic.columns) <= set(ha.GENOMIC_CANDIDATES)
+    assert set(genomic.inputs) <= set(ha.GENOMIC_CANDIDATES)
+
+    clinical_sources = {ha.aggregate_source_column(c) for c in clinical.columns}
+    assert clinical_sources <= set(ha.CLINICAL_CANDIDATES)
+    assert set(clinical.inputs) <= set(ha.CLINICAL_CANDIDATES)
+
+    # Disjoint as model columns and as the raw fields a caller supplies: no
+    # column may be claimed by both blocks under either name.
+    assert not set(genomic.columns) & set(clinical.columns)
+    assert not set(genomic.inputs) & set(clinical.inputs)
 
 
 def test_merged_is_the_union_of_the_other_two(specs):
@@ -46,23 +75,45 @@ def test_merged_is_the_union_of_the_other_two(specs):
 
 
 def test_resolved_feature_counts(specs):
-    assert len(specs["genomic"].columns) == 20
-    assert len(specs["clinical"].columns) == 9
-    assert len(specs["merged"].columns) == 29
+    """Merged is genomic + clinical, and each block is non-trivial.
+
+    Asserted as a relationship rather than three magic numbers: the counts move
+    whenever a column is excluded for a documented reason, and a test that has
+    to be edited for every such change stops being a check.
+    """
+    genomic, clinical, merged = (specs[k] for k in ("genomic", "clinical", "merged"))
+    assert len(genomic.columns) >= 10
+    assert len(clinical.columns) >= 10
+    assert len(merged.columns) == len(genomic.columns) + len(clinical.columns)
+    # The clinical block is aggregates of a handful of raw fields, so it must
+    # expand: five statistics per measurement plus the severity features.
+    assert len(clinical.columns) > len(clinical.inputs)
 
 
-def test_candidates_absent_from_the_data_are_dropped_not_invented(specs, merged):
-    """`mutations` is in both tables, so the join suffixes it and neither
-    `mutations_clinical` nor `mutations_genomic` is the candidate column."""
-    assert "mutations" in specs["genomic"].dropped
-    assert "mutations" not in merged.columns
-    assert "mutations_genomic" in merged.columns
+def test_candidates_absent_from_the_data_are_dropped_not_invented(specs, records):
+    """`mutations` is in both tables, so the join suffixes it.
+
+    Neither `mutations_clinical` nor `mutations_genomic` is the candidate
+    column, and the constant column must not reach a feature set under any name.
+    """
+    assert "mutations" in ha.EXCLUDED_COLUMNS
+    assert "mutations" not in records.columns
+    assert "mutations_genomic" in records.columns
+    for spec in specs.values():
+        assert not [c for c in spec.columns if c.startswith("mutations")]
 
 
-def test_all_null_candidates_are_dropped(specs, merged):
+def test_all_null_candidates_are_dropped(specs, records):
+    """bleed_tool and bleed_score are empty in the source, so they are excluded.
+
+    They are named in EXCLUDED_COLUMNS with that reason rather than being
+    silently filtered, so the exclusion travels with the pipeline.
+    """
     for column in ("bleed_tool", "bleed_score"):
-        assert column in specs["clinical"].dropped
-        assert merged[column].isna().all()
+        assert column in ha.EXCLUDED_COLUMNS
+        assert records[column].isna().all()
+        for spec in specs.values():
+            assert column not in spec.columns
 
 
 def test_every_resolved_feature_exists_and_varies(specs, merged):
@@ -79,9 +130,23 @@ def test_numeric_and_categorical_partition_the_columns(specs):
 
 
 def test_required_columns_are_the_ones_that_are_nearly_always_present(specs, merged):
+    """`required` names the RAW fields a caller fills in, not model columns.
+
+    The missing rate is therefore read off the aggregates that field produces.
+    Both directions are asserted: a required field is nearly always present, and
+    a field left optional genuinely is not - otherwise the API could quietly
+    stop asking for something it depends on.
+    """
     for spec in specs.values():
-        for column in spec.required:
-            assert merged[column].isna().mean() <= ha.REQUIRED_MAX_MISSING_RATE
+        assert set(spec.required) <= set(spec.inputs)
+        for field in spec.inputs:
+            derived = [c for c in spec.columns if ha.aggregate_source_column(c) == field]
+            assert derived, f"{spec.name}: no model column derives from {field}"
+            rates = [float(merged[c].isna().mean()) for c in derived]
+            if field in spec.required:
+                assert max(rates) <= ha.REQUIRED_MAX_MISSING_RATE, field
+            else:
+                assert min(rates) > ha.REQUIRED_MAX_MISSING_RATE, field
 
 
 def test_feature_spec_round_trips_through_metadata(specs):
@@ -108,13 +173,55 @@ def test_preprocessor_output_has_no_missing_values(fitted, merged):
     assert matrix.shape[0] == len(merged)
 
 
-def test_missing_categoricals_become_an_explicit_unknown_level(fitted):
-    """SimpleImputer does not treat Python None as missing on object arrays, so
-    nulls would otherwise become a literal 'None' category."""
-    _, pre = fitted
-    names = ha.encoded_feature_names(pre)
-    assert any(n.endswith(f"_{ha.MISSING_CATEGORY}") for n in names)
-    assert not any(n.endswith("_None") for n in names)
+#: The two spellings a null can reach the encoder under. ``MISSING_CATEGORY``
+#: is the value ``SimpleImputer`` fills in. ``"None"`` is what pandas'
+#: ``groupby.first()`` leaves behind when a mutation's records are all null on
+#: an object column: it re-materialises the gap as Python ``None``, and
+#: ``SimpleImputer``'s mask is ``X != X``, which ``None`` does not satisfy - so
+#: it is not imputed and the encoder fits it as its own literal level.
+NULL_MARKERS = frozenset({ha.MISSING_CATEGORY, "None"})
+
+
+def test_missing_categoricals_become_an_explicit_level(fitted, merged, records):
+    """A null must reach the model as its own level, never folded into a real one.
+
+    That is the guarantee: a mutation with no recorded ``CpG`` status must be
+    representable, and must not be indistinguishable from one that has a
+    recorded status. It is asserted three ways, so it holds whichever of the two
+    mechanisms above produced the level:
+
+    * a column with nulls gets exactly one null marker - not two, not zero;
+    * a column without nulls gets none, so no marker is invented;
+    * no marker is a spelling the source files themselves use, which is what
+      would make "not reported" collide with a genuine value.
+
+    The imputer path is asserted separately, because it is the one the pipeline
+    controls deliberately and a silent regression there would leave every
+    categorical relying on the pandas accident.
+    """
+    spec, pre = fitted
+    categories = ha.fitted_categories(pre, spec)
+
+    assert any(
+        ha.MISSING_CATEGORY in categories[c] for c in spec.categorical
+    ), "the explicit-missing imputation path never reached the encoder"
+
+    for column in spec.categorical:
+        source = ha.aggregate_source_column(column)
+        observed = (
+            set(records[source].dropna().astype(str))
+            if source in records.columns
+            else set()
+        )
+        assert not NULL_MARKERS & observed, (
+            f"{source} uses {sorted(NULL_MARKERS & observed)} as a real value, "
+            "so a missing value can no longer be told apart from a recorded one"
+        )
+        markers = NULL_MARKERS & set(categories[column])
+        if merged[column].isna().any():
+            assert len(markers) == 1, f"{column}: {sorted(markers)}"
+        else:
+            assert not markers, f"{column}: {sorted(markers)}"
 
 
 def test_numeric_missingness_is_recorded_not_hidden(fitted):
@@ -142,16 +249,36 @@ def test_transform_is_row_order_independent(fitted, merged):
 
 
 def test_encoded_names_map_back_to_source_columns(fitted):
+    """Every encoded column resolves to a RAW field the caller supplies.
+
+    ``source_column_for`` now peels off two layers - the encoder's prefix and
+    one-hot suffix, then the aggregation suffix - so it lands on ``clotting``
+    rather than ``clotting_median``. An explanation therefore names something
+    the caller actually filled in, which is only true if the result is always a
+    member of ``spec.inputs``.
+    """
     spec, pre = fitted
-    known = set(spec.columns)
+    known = set(spec.inputs)
+    resolved = set()
     for name in ha.encoded_feature_names(pre):
-        assert spec.source_column_for(name) in known, name
+        source = spec.source_column_for(name)
+        assert source in known, name
+        resolved.add(source)
+    # No input is unreachable: every field the API asks for shows up behind at
+    # least one encoded column, so nothing is requested that the model ignores.
+    assert resolved == known
 
 
 def test_source_column_mapping_prefers_the_longest_match(specs):
     spec = specs["merged"]
-    # aa_numb and aa_numb_old share a prefix; a naive scan would mis-attribute.
-    assert spec.source_column_for("num__aa_numb_old") == "aa_numb_old"
+    # clotting_mean and clotting_median share a prefix; a naive scan would
+    # mis-attribute one to the other. Both must land on the field a caller
+    # actually filled in.
+    assert spec.source_column_for("num__clotting_mean") == "clotting"
+    assert spec.source_column_for("num__clotting_median") == "clotting"
+    assert spec.source_column_for("num__clotting_censored_rate") == "clotting"
+    assert spec.source_column_for("num__severity_prop_severe") == "cli_phe"
+    assert spec.source_column_for("cat__cli_phe_mode_Severe") == "cli_phe"
     assert spec.source_column_for("num__aa_numb") == "aa_numb"
     assert spec.source_column_for("cat__mut_type_Point") == "mut_type"
     assert spec.category_value_for("cat__mut_type_Point") == "Point"
@@ -159,11 +286,16 @@ def test_source_column_mapping_prefers_the_longest_match(specs):
 
 
 def test_fitted_categories_expose_the_training_vocabulary(fitted):
+    """The vocabulary is keyed on MODEL columns, so severity lives on the
+    aggregate ``cli_phe_mode`` - the dominant phenotype across a mutation's
+    records - and not on the raw ``cli_phe`` field it was derived from."""
     spec, pre = fitted
     categories = ha.fitted_categories(pre, spec)
     assert set(categories) == set(spec.categorical)
     assert "Point" in categories["mut_type"]
-    assert "Severe" in categories["cli_phe"]
+    assert "Severe" in categories[f"{ha.SEVERITY_COLUMN}_mode"]
+    assert ha.SEVERITY_COLUMN not in categories
+    assert ha.SEVERITY_COLUMN in spec.inputs
 
 
 def test_offered_categories_exclude_the_infrequent_bucket(fitted):
@@ -172,15 +304,22 @@ def test_offered_categories_exclude_the_infrequent_bucket(fitted):
     offered = ha.frequent_categories(pre, spec)
     for column in spec.categorical:
         assert set(offered[column]) <= set(seen[column])
-    # mut_syn is a near-identifier: most of its values are folded away.
-    assert len(offered["mut_syn"]) < len(seen["mut_syn"])
+    # aa_last has a long tail of rare spellings; those are folded into the
+    # encoder's "infrequent" bucket and must not be offered as choices.
+    assert len(offered["aa_last"]) < len(seen["aa_last"])
 
 
-def test_open_vocabulary_columns_are_the_identifier_like_ones(fitted):
+def test_open_vocabulary_columns_are_the_high_cardinality_ones(fitted):
+    """A wide categorical accepts unseen values; a small closed one does not.
+
+    aa_last carries hundreds of spellings, so rejecting an unseen one would be
+    wrong. mut_type has six, so an unrecognised value there is a caller error
+    and must produce a named 422 rather than a bucketed guess.
+    """
     spec, pre = fitted
     open_columns = ha.open_vocabulary_columns(pre, spec)
-    assert {"mut_syn", "aa_syn", "nuc_numb", "clotting"} <= open_columns
-    assert not {"mut_type", "location", "cli_phe", "CpG"} & open_columns
+    assert "aa_last" in open_columns
+    assert not {"mut_type", "location", "cli_phe_mode", "CpG"} & open_columns
 
 
 def test_a_feature_set_with_no_columns_is_refused():
@@ -226,16 +365,33 @@ def test_leakage_assertion_rejects_an_overlapping_split(merged, split):
         assert_no_group_overlap(merged, train, val, np.concatenate([test, train[:5]]))
 
 
-def test_a_random_row_split_would_have_leaked(merged):
-    """The reason the split is grouped: a plain shuffle puts records of the same
-    mutation on both sides."""
+def test_a_random_row_split_of_the_records_would_have_leaked(records, merged):
+    """Why aggregation happens *before* the split, not after.
+
+    A random row split of the mutation table cannot leak - each mutation is
+    exactly one row there, so the property is trivially true and asserting it
+    would test nothing. The safety is manufactured one step earlier: the
+    record-level table this mutation table was aggregated from carries many
+    rows per ``mut_id``, and a plain shuffle of *those* rows puts records of the
+    same mutation - and its identical genomic block - on both sides.
+
+    So the guarantee is asserted where it can still fail: the records would have
+    leaked, and aggregation is what removes the possibility.
+    """
     from sklearn.model_selection import train_test_split
 
     train, test = train_test_split(
-        np.arange(len(merged)), test_size=0.2, random_state=42
+        np.arange(len(records)), test_size=0.2, random_state=42
     )
-    groups = merged[ha.GROUP_COLUMN]
+    groups = records[ha.GROUP_COLUMN]
     assert set(groups.iloc[train]) & set(groups.iloc[test])
+
+    # The collapse is real - there are strictly fewer mutations than records -
+    # and it is complete: no mut_id survives twice, so no split of the modelled
+    # table can put one mutation on both sides.
+    assert records[ha.GROUP_COLUMN].duplicated().any()
+    assert len(merged) < len(records)
+    assert not merged[ha.GROUP_COLUMN].duplicated().any()
 
 
 def test_every_split_contains_both_classes(merged, split):

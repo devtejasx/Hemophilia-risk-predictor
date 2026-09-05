@@ -85,7 +85,7 @@ const Analytics: React.FC = () => {
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
           {importance?.available
-            ? `${importance.method}. This describes the model overall, not any individual patient.`
+            ? `${importance.method}. This describes the model overall — not any single mutation, and not any individual patient.`
             : `Unavailable: ${importance?.reason ?? 'unknown reason'}`}
         </p>
         {importanceData.length > 0 && (

@@ -4,10 +4,10 @@ The backend owns no feature logic of its own. It calls ml.inference and
 ml.explainability, which are the same code paths the training script and the
 tests use. Services are constructed once at application startup.
 
-There is one model per prediction mode — genomic, clinical and merged, as in
-final(1).ipynb — so this module holds a small registry rather than a single
-service. A mode whose artifact is missing is recorded as unavailable and
-reported by /health; it does not stop the others from serving.
+There is one model per prediction mode — genomic (MMC2 only), clinical (MMC3
+only) and merged (both, the default) — so this module holds a small registry
+rather than a single service. A mode whose artifact is missing is recorded as
+unavailable and reported by /health; it does not stop the others from serving.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def default_feature_set() -> str:
 
 
 def available_feature_sets() -> list[str]:
-    """Modes with a loaded model, in the notebook's order."""
+    """Modes with a loaded model, in registry order."""
     return [name for name in FEATURE_SET_VERSIONS if name in _predictions]
 
 
@@ -144,12 +144,12 @@ def interpretation(probability: float, threshold: float, category: str) -> str:
     "Consider hospitalization for immune tolerance induction"."""
     percent = probability * 100
     return (
-        f"The model estimates a {percent:.1f}% probability that a record with "
-        f"this mutation and clinical description reports inhibitor development, "
-        f"against a decision threshold of {threshold * 100:.1f}% "
-        f"({category.lower()}). This is an estimate attributed to the record's "
-        f"features, not a prediction about an individual patient, and it does "
-        f"not indicate any course of treatment."
+        f"The model estimates a {percent:.1f}% probability that an F8 mutation "
+        f"with this genomic and clinical description is reported with inhibitor "
+        f"development, against a decision threshold of {threshold * 100:.1f}% "
+        f"({category.lower()}). This is an estimate about the mutation as the "
+        f"source literature reports it, not a prediction about an individual "
+        f"patient, and it does not indicate any course of treatment."
     )
 
 

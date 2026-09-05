@@ -5,7 +5,7 @@ Explanations are computed at their own endpoint and cached in the database, so
 a slow explainer never delays a prediction.
 
 Three prediction modes are served, matching the feature blocks in
-final(1).ipynb: `genomic` (MMC2 only), `clinical` (MMC3 only) and `merged`
+`genomic` (MMC2 only), `clinical` (MMC3 only) and `merged`
 (both). Each is a separately trained artifact; the caller picks one per request
 and the response says which answered.
 """
