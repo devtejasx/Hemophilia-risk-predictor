@@ -197,7 +197,7 @@ Successfully refactored a complex medical AI project with 150+ files and massive
 - Multiple `*.csv` sample files (can be regenerated)
 - `evaluation_report.json` (can be regenerated)
 - `model_metrics.csv` (training artifact)
-- `champ.csv`, `genomic.csv`, `clinical.csv` (sample data)
+- `genomic.csv`, `clinical.csv` (sample data)
 
 **KEPT:**
 - `.env.example` - Configuration template

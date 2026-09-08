@@ -3,8 +3,10 @@
 One implementation per concern. Anything not listed here as canonical is either
 superseded (and lives under `archive/`) or does not exist yet.
 
-Decisions were made from the Phase 0 audit (now archived under `archive/`) on evidence of actual
-use and code quality — not on which implementation was newest.
+Decisions were made from the Phase 0 audit on evidence of actual use and code
+quality — not on which implementation was newest. That audit described the
+retired variant-level pipeline and was removed with it; its conclusions survive
+as the table below.
 
 | Concern | Canonical | Chosen over | Why |
 |---|---|---|---|

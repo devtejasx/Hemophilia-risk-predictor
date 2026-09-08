@@ -59,19 +59,16 @@ class GenomicClinicalFusion:
     }
     
     def __init__(self, genomic_path: str = "genomic.csv", 
-                 clinical_path: str = "clinical.csv",
-                 champ_path: Optional[str] = "champ.csv"):
+                 clinical_path: str = "clinical.csv"):
         """
         Initialize the data fusion engine.
         
         Args:
             genomic_path: Path to genomic data (F8 mutations, severity)
             clinical_path: Path to clinical data (patient history, treatment)
-            champ_path: Optional path to CHAMP inhibitor registry data
         """
         self.genomic_path = genomic_path
         self.clinical_path = clinical_path
-        self.champ_path = champ_path
         self.df_genomic = None
         self.df_clinical = None
         self.df_fused = None

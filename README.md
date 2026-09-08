@@ -499,10 +499,8 @@ archive/             superseded implementations, kept for provenance; nothing
 
 This repository previously contained four competing application stacks, three
 non-importing FastAPI backends, four Streamlit UIs, five chatbot
-implementations, and around 100 aspirational markdown documents. The audit that
-untangled it is archived under `archive/` alongside the pipeline it describes;
-the canonical choices that came out of it are in
-**[docs/CANONICAL.md](docs/CANONICAL.md)**.
+implementations, and around 100 aspirational markdown documents. The canonical
+choices that resolved it are in **[docs/CANONICAL.md](docs/CANONICAL.md)**.
 
 Two findings worth knowing:
 
@@ -517,12 +515,17 @@ Two findings worth knowing:
   untracking does not remove it from git history: those accounts should be
   treated as compromised.
 
-Every superseded implementation was moved into `archive/` with `git mv`, so
-history follows each file and nothing was deleted. Only what this page describes
-is live: the MMC2 + MMC3 fusion, aggregated per mutation, behind one FastAPI
-application and one React UI. Metrics produced by any earlier pipeline describe
-a different dataset and a different modelling unit, and must never be quoted for
-the current models.
+Superseded implementations were moved into `archive/` with `git mv`, so history
+follows each file. The one exception is the retired variant-level dataset and
+its pipeline, which were **deleted outright** rather than archived: keeping a
+second dataset in the tree invited exactly the confusion this migration set out
+to end. It remains reachable in git history, but nothing in the working tree
+refers to it.
+
+Only what this page describes is live: the MMC2 + MMC3 fusion, aggregated per
+mutation, behind one FastAPI application and one React UI. Metrics produced by
+any earlier pipeline describe a different dataset and a different modelling
+unit, and must never be quoted for the current models.
 
 ## License
 
