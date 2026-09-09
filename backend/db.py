@@ -13,7 +13,7 @@ Design notes:
   identifier and a display name; every predictive field lives in
   ``case_records`` because those are the only fields the model consumes.
 * ``case_records`` stores the submitted features as JSON rather than as fixed
-  columns. The three feature sets take 20, 9 and 29 source columns, and the
+  columns. The three feature sets take 14, 6 and 20 input fields, and the
   exact list is decided at training time by what the MMC2/MMC3 files contain —
   so a fixed-column table would have to be migrated every time a model is
   retrained. The feature set and model version are stored alongside, and

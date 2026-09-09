@@ -3,7 +3,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
-![Tests](https://img.shields.io/badge/tests-161%20passing-2C6642)
+![Tests](https://img.shields.io/badge/tests-230%20passing-2C6642)
 ![Status](https://img.shields.io/badge/status-research%20prototype-8A5D0B)
 
 An explainable Hemophilia A inhibitor-risk prediction **research prototype**,
@@ -20,6 +20,7 @@ fused on `mut_id` into **one row per mutation**.
 ## Contents
 
 - [What it does](#what-it-does)
+- [Project phase](#project-phase)
 - [Architecture](#architecture)
 - [Dataset](#dataset)
 - [Prediction target](#prediction-target)
@@ -45,6 +46,40 @@ probability that a **mutation** with that description is reported with an
 inhibitor, together with SHAP and LIME explanations of which genomic and
 clinical features drove the estimate. Predictions and explanations are stored
 and viewable as history.
+
+## Project phase
+
+Stated plainly so the scope is not read off the ambition.
+
+**Current version — MMC2 + MMC3, fused at the mutation level.** Implemented and
+serving:
+
+- MMC2 genomic features and MMC3 clinical features, joined on `mut_id`
+- genomic-only, clinical-only and merged prediction modes, one trained artifact
+  each, selectable per request
+- calibrated probability, decision threshold chosen on a validation split, risk
+  band, SHAP and LIME explanations, stored prediction history
+- doctor sign-in, patient records scoped per account, audit log
+
+**Not implemented. The application does not have these and does not claim to:**
+
+- **patient-level data of any kind.** A row is one F8 mutation as the source
+  literature reports it. There is no patient-level cohort behind any estimate,
+  so nothing here is a statement about an individual.
+- **treatment history, exposure days (ED), product type or switching.** None of
+  these columns exists in MMC2 or MMC3, so no model was fitted on them and no
+  form collects them.
+- **HLA typing or immune biomarkers.** Same reason.
+- **external validation.** One dataset, one grouped split.
+
+The patient form therefore asks for an identifier and a display name and nothing
+else clinical: every predictive field is an MMC2/MMC3 column, and the form is
+built from the served model's own schema (`GET /api/predictions/schema`) so it
+cannot offer a field the model was never fitted on.
+
+**Future work** would need a patient-level cohort with treatment and exposure
+records, and an external validation set. Adding those means new datasets and a
+retrained model, not new form fields.
 
 ## Architecture
 
@@ -165,11 +200,18 @@ with the reason for each, lives in `EXCLUDED_COLUMNS` in
 Three blocks, resolved from the columns that actually exist in the files. Each
 is a separately trained model and a selectable prediction mode.
 
+Three counts, because they differ and the difference matters: **fields** is what
+a caller supplies, **columns** is what those become after the per-mutation
+clinical aggregation expands each assay into mean / median / min / max and a
+censored rate, and **encoded features** is the width of the matrix the model
+sees after one-hot encoding. Every number here is read from the artifact's own
+`metadata.json`.
+
 | Mode | Source | Model version | Input columns |
 |---|---|---|---|
-| **Genomic** | MMC2 | `mmc2-genomic-v1` | 14 fields → 14 features |
-| **Clinical** | MMC3, aggregated per mutation | `mmc3-clinical-v1` | 6 fields → 33 features |
-| **Merged** | both | `mmc2-mmc3-v1` | 20 fields → 47 features — **the default** |
+| **Genomic** | MMC2 | `mmc2-genomic-v1` | 14 fields → 14 columns → 248 encoded features |
+| **Clinical** | MMC3, aggregated per mutation | `mmc3-clinical-v1` | 6 fields → 33 columns → 72 encoded features |
+| **Merged** | both | `mmc2-mmc3-v1` | 20 fields → 47 columns → 320 encoded features — **the default** |
 
 Genomic — one value per mutation, straight from MMC2: `mut_type`, `mut_effect`,
 `location`, `e_i_numb`, `locnumb`, `aa_numb`, `codon_first`, `codon_last`,

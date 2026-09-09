@@ -254,6 +254,9 @@ def _to_response(row: dict) -> PredictionResponse:
         features=row.get("features", {}),
         mutation_label=row.get("mutation_label"),
         interpretation=ml.interpretation(
-            row["probability"], row["threshold"], row["risk_category"]
+            row["probability"],
+            row["threshold"],
+            row["risk_category"],
+            row["feature_set"],
         ),
     )

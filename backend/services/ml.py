@@ -130,18 +130,34 @@ def model_versions() -> dict[str, str]:
     return {name: svc.version for name, svc in _predictions.items()}
 
 
-def interpretation(probability: float, threshold: float, category: str) -> str:
+#: How each mode describes its own input. The wording has to name the block the
+#: model was actually fitted on: telling a caller that a genomic-only estimate
+#: used "this genomic and clinical description" claims an input the model never
+#: saw.
+_DESCRIPTION_OF_INPUT = {
+    "genomic": "with this genomic description",
+    "clinical": "whose reported clinical records look like this",
+    "merged": "with this genomic description and these reported clinical records",
+}
+
+
+def interpretation(
+    probability: float, threshold: float, category: str, feature_set: str
+) -> str:
     """Probabilistic wording for the UI. Never a verdict, never a treatment
     recommendation — the archived pipeline returned strings such as
     "Consider hospitalization for immune tolerance induction"."""
     percent = probability * 100
+    described = _DESCRIPTION_OF_INPUT.get(
+        feature_set, "with this description"
+    )
     return (
         f"The model estimates a {percent:.1f}% probability that an F8 mutation "
-        f"with this genomic and clinical description is reported with inhibitor "
-        f"development, against a decision threshold of {threshold * 100:.1f}% "
-        f"({category.lower()}). This is an estimate about the mutation as the "
-        f"source literature reports it, not a prediction about an individual "
-        f"patient, and it does not indicate any course of treatment."
+        f"{described} is reported with inhibitor development, against a decision "
+        f"threshold of {threshold * 100:.1f}% ({category.lower()}). This is an "
+        f"estimate about the mutation as the source literature reports it, not a "
+        f"prediction about an individual patient, and it does not indicate any "
+        f"course of treatment."
     )
 
 

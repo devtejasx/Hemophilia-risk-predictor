@@ -138,16 +138,16 @@ never reaches the model.
   "patient_id": 1,
   "prediction": 0,
   "risk": "Low",
-  "probability": 0.093977,
+  "probability": 0.156331,
   "risk_category": "Lower estimated risk",
-  "threshold": 0.24532813727855682,
+  "threshold": 0.23842151443687945,
   "model_version": "mmc2-mmc3-v1",
   "feature_set": "merged",
   "preprocessing_version": "mmc-preprocessing-1",
   "created_at": "2026-09-03 10:31:46",
   "features": { "mut_type": "Point", "...": "..." },
   "mutation_label": "c.1834C>T",
-  "interpretation": "The model estimates a 9.4% probability that a record with this mutation and clinical description reports inhibitor development, against a decision threshold of 24.5% (lower estimated risk). This is an estimate attributed to the record's features, not a prediction about an individual patient, and it does not indicate any course of treatment.",
+  "interpretation": "The model estimates a 15.6% probability that an F8 mutation with this genomic description and these reported clinical records is reported with inhibitor development, against a decision threshold of 23.8% (lower estimated risk). This is an estimate about the mutation as the source literature reports it, not a prediction about an individual patient, and it does not indicate any course of treatment.",
   "disclaimer": "Research decision-support prototype. This estimate is not intended for standalone diagnosis or treatment decisions."
 }
 ```
@@ -157,6 +157,11 @@ the same fact as `"High"` / `"Low"`. `risk_category` carries the longer
 `Lower estimated risk` / `Elevated estimated risk` wording. The split is always
 the model's own recorded `threshold` — never a hardcoded 0.5, and never a
 verdict. The API does not recommend treatment.
+
+`interpretation` names the feature block the answering model was fitted on, so
+a `genomic` estimate says "with this genomic description" and a `clinical` one
+"whose reported clinical records look like this". It never credits an input the
+model did not receive.
 
 **422 on a value outside a closed vocabulary**, with the accepted values,
 rather than a prediction about a row the model has never seen:

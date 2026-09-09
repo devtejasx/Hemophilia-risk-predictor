@@ -31,11 +31,11 @@ from ml.preprocessing import hemophilia_a as ha
 logger = logging.getLogger(__name__)
 
 #: Explanations are expensive relative to a tree prediction, so the number of
-#: features returned is capped rather than dumping every encoded column — 1,373
+#: features returned is capped rather than dumping every encoded column — 320
 #: of them for the merged model.
 DEFAULT_TOP_N = 8
 
-#: LIME perturbs the encoded vector. Over a four-figure feature space the
+#: LIME perturbs the encoded vector. Over a few hundred encoded columns the
 #: default neighbourhood size is slow enough to matter on a request path, so it
 #: is reduced here; the local model is still fitted on a thousand samples.
 LIME_NUM_SAMPLES = 1000

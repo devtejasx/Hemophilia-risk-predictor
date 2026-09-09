@@ -32,7 +32,7 @@ split.
 
 | Version | Feature set | Status |
 |---|---|---|
-| `mmc2-mmc3-v1` | MMC2 genomic + MMC3 clinical, aggregated per `mut_id` | **Default.** <!-- TODO: state how it compares to the single-source artifacts, from a real training run. Do not write a number here until then. --> |
+| `mmc2-mmc3-v1` | MMC2 genomic + MMC3 clinical, aggregated per `mut_id` | **Default.** Best of the three on the held-out test split: ROC-AUC 0.7998 / PR-AUC 0.5042 / Brier 0.1296, against 0.7793 / 0.4850 / 0.1331 for MMC2 alone and 0.7380 / 0.3991 / 0.1402 for MMC3 alone. The margin over genomic-only is 0.021 ROC-AUC — real but small, and see the model-choice caveat in the README's Limitations. |
 | `mmc2-genomic-v1` | MMC2 only | Selectable per request. |
 | `mmc3-clinical-v1` | MMC3 only, aggregated per `mut_id` | Selectable per request. |
 | `legacy-synthetic-v0` | — | Preserved, never default. Trained on fabricated rows; see its `PROVENANCE.md`. Requesting it raises rather than serving. |
