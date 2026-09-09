@@ -389,11 +389,6 @@ def service_for_feature_set(
     return get_prediction_service(FEATURE_SET_VERSIONS[feature_set], artifacts_dir)
 
 
-def reset_services() -> None:
-    """Drop cached services. Used by tests; not called by the application."""
-    _services.clear()
-
-
 def predict(payload: dict[str, Any], feature_set: str = "merged") -> dict[str, Any]:
     """Convenience wrapper around the cached service for one feature set."""
     return service_for_feature_set(feature_set).predict(payload).as_dict()

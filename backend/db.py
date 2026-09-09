@@ -27,7 +27,6 @@ import json
 import logging
 import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Iterator
 
 from backend.core.config import settings
@@ -127,17 +126,8 @@ LEGACY_SCHEMA_TABLES = {
     "explanations": "legacy_pre_mmc_explanations",
 }
 
+#: The file every connection opens. Tests point this at a tmp_path copy.
 _db_path: str = settings.database_path
-
-
-def set_database_path(path: str | Path) -> None:
-    """Point the layer at a different file. Used by tests for isolation."""
-    global _db_path
-    _db_path = str(path)
-
-
-def database_path() -> str:
-    return _db_path
 
 
 @contextmanager

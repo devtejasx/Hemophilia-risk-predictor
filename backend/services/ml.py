@@ -130,14 +130,6 @@ def model_versions() -> dict[str, str]:
     return {name: svc.version for name, svc in _predictions.items()}
 
 
-def feature_set_for_version(version: str) -> str | None:
-    """Which mode a stored prediction's model version belongs to."""
-    for name, service in _predictions.items():
-        if service.version == version:
-            return name
-    return None
-
-
 def interpretation(probability: float, threshold: float, category: str) -> str:
     """Probabilistic wording for the UI. Never a verdict, never a treatment
     recommendation — the archived pipeline returned strings such as

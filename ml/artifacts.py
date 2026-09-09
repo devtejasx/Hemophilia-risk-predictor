@@ -198,8 +198,3 @@ def _verify_consistency(bundle: ArtifactBundle) -> None:
             f"features but the estimator expects {actual}"
         )
 
-
-def clear_cache() -> None:
-    """Drop cached bundles. Used by tests; not called by the application."""
-    with _lock:
-        _cache.clear()
