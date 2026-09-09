@@ -169,9 +169,6 @@ export const patientAPI = {
     const { data } = await apiClient.post<Patient>('/patients', payload)
     return data
   },
-  remove: async (id: number) => {
-    await apiClient.delete(`/patients/${id}`)
-  },
 }
 
 export const predictionAPI = {

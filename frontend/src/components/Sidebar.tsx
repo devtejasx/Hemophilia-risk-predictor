@@ -19,9 +19,7 @@ const items: SidebarItem[] = [
 export const Sidebar: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { sidebarOpen, user, signOut, theme, setTheme } = useAppStore()
-
-  if (!sidebarOpen) return null
+  const { user, signOut, theme, setTheme } = useAppStore()
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
