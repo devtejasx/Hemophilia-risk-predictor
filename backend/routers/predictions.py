@@ -150,6 +150,9 @@ def get_explanation(
     if not refresh:
         cached = db.get_explanations(prediction_id)
         if {"shap", "lime"} <= set(cached):
+            db.write_audit_log(
+                current_user["id"], "explanation.access", "predictions", prediction_id
+            )
             return ExplanationResponse(
                 prediction_id=prediction_id,
                 model_version=stored["model_version"],
@@ -200,6 +203,9 @@ def get_explanation(
         db.save_explanation(
             prediction_id, method, {**computed[method], "unit_of_explanation": unit}
         )
+    db.write_audit_log(
+        current_user["id"], "explanation.compute", "predictions", prediction_id
+    )
 
     return ExplanationResponse(
         prediction_id=prediction_id,
