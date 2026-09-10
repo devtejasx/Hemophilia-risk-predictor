@@ -529,8 +529,7 @@ backend/             one FastAPI application
                          the routers are written against
   services/ml.py     composition root: builds the models, hands them out as
                      those protocols; one service per mode
-  db.py              the single SQLite layer; its migration renames a superseded
-                     schema's tables aside (legacy_pre_mmc_*) with data intact
+  db.py              the single SQLite layer
 ml/
   data/              BVTH_VTH-2024-000215-mmc2.csv + …-mmc3.csv
   preprocessing/hemophilia_a.py   load, validate, merge, aggregate per mutation,
@@ -597,11 +596,13 @@ Two findings worth knowing:
   treated as compromised.
 
 Superseded implementations were moved into `archive/` with `git mv`, so history
-follows each file. The one exception is the retired variant-level dataset and
-its pipeline, which were **deleted outright** rather than archived: keeping a
-second dataset in the tree invited exactly the confusion this migration set out
-to end. It remains reachable in git history, but nothing in the working tree
-refers to it.
+follows each file. The one exception is **CHAMP**, the variant-level dataset the
+project used before MMC2 + MMC3. **CHAMP is not used anywhere in this
+project.** Its data, preprocessing, training script, `champ-v1` model, benchmark
+run, and the database migration that carried its tables forward were **deleted
+outright** rather than archived: keeping a second dataset in the tree invited
+exactly the confusion this migration set out to end. It remains reachable in git
+history only; nothing in the working tree loads it.
 
 Only what this page describes is live: the MMC2 + MMC3 fusion, aggregated per
 mutation, behind one FastAPI application and one React UI. Metrics produced by
