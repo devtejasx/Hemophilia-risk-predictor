@@ -1,13 +1,20 @@
-"""Backend-side adapter over the ML package.
+"""The composition root: builds the served models and hands them out as interfaces.
 
 The backend owns no feature logic of its own. It calls ml.inference and
 ml.explainability, which are the same code paths the training script and the
 tests use. Services are constructed once at application startup.
 
-There is one model per prediction mode — genomic (MMC2 only), clinical (MMC3
-only) and merged (both, the default) — so this module holds a small registry
-rather than a single service. A mode whose artifact is missing is recorded as
-unavailable and reported by /health; it does not stop the others from serving.
+There is one model per prediction mode — genomic, clinical and merged (the
+default) — so this module holds a small registry rather than a single service.
+A mode whose artifact is missing is recorded as unavailable and reported by
+/health; it does not stop the others from serving.
+
+**This is the only module that names a concrete model class.** ``startup``
+constructs them; every accessor returns them typed as the ``PredictionModel``
+and ``ExplanationProvider`` protocols in ``backend.services.contracts``, and the
+routers are written against those. Swapping in a different model is therefore a
+change to ``startup`` alone — no router, schema or frontend edit — provided the
+new class satisfies the same protocol.
 """
 
 from __future__ import annotations
@@ -16,14 +23,17 @@ import logging
 from typing import Any
 
 from backend.core.config import settings
+from backend.services.contracts import ExplanationProvider, PredictionModel
 from ml.artifacts import ArtifactError
 from ml.explainability.service import ExplanationService
 from ml.inference import FEATURE_SET_VERSIONS, PredictionService
 
 logger = logging.getLogger(__name__)
 
-_predictions: dict[str, PredictionService] = {}
-_explanations: dict[str, ExplanationService] = {}
+# Held as the interfaces, not the concrete classes: only `startup` below builds
+# the implementations, so nothing else in the backend depends on which they are.
+_predictions: dict[str, PredictionModel] = {}
+_explanations: dict[str, ExplanationProvider] = {}
 _errors: dict[str, str] = {}
 
 
@@ -55,6 +65,8 @@ def startup() -> None:
 
     for feature_set, version in targets.items():
         try:
+            # Concrete here on purpose: this is where implementations are
+            # chosen, and building the explainer needs the loaded artifact.
             service = PredictionService(version, settings.artifacts_dir)
             _predictions[feature_set] = service
             _explanations[feature_set] = ExplanationService(service.bundle)
@@ -97,7 +109,7 @@ def _resolve(feature_set: str | None) -> str:
     return name
 
 
-def prediction_service(feature_set: str | None = None) -> PredictionService:
+def prediction_service(feature_set: str | None = None) -> PredictionModel:
     name = _resolve(feature_set)
     service = _predictions.get(name)
     if service is None:
@@ -108,7 +120,7 @@ def prediction_service(feature_set: str | None = None) -> PredictionService:
     return service
 
 
-def explanation_service(feature_set: str | None = None) -> ExplanationService:
+def explanation_service(feature_set: str | None = None) -> ExplanationProvider:
     name = _resolve(feature_set)
     service = _explanations.get(name)
     if service is None:

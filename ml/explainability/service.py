@@ -371,19 +371,3 @@ def _label_for(column: str) -> str:
 
     return FEATURE_LABELS.get(column, {}).get("label", column)
 
-
-_services: dict[str, ExplanationService] = {}
-
-
-def get_explanation_service(bundle: ArtifactBundle) -> ExplanationService:
-    """Process-wide cache so each version's explainers are constructed once."""
-    service = _services.get(bundle.version)
-    if service is None:
-        service = ExplanationService(bundle)
-        _services[bundle.version] = service
-    return service
-
-
-def reset_explanation_services() -> None:
-    """Drop cached services. Used by tests; not called by the application."""
-    _services.clear()
