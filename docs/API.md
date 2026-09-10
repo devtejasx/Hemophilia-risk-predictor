@@ -124,11 +124,35 @@ Optional query parameter `feature_set`.
 }
 ```
 
-`features` is keyed by MMC2/MMC3 source column name. The accepted keys are not
-fixed in the API layer: they are whatever the served model's schema reports for
-the chosen mode, so retraining on a different feature set needs no API change
-and the two can never disagree. `mutation_label` is a display convenience and
-never reaches the model.
+`features` is keyed by source column name. The accepted keys are not fixed in
+the API layer: they are whatever the served model's schema reports for the
+chosen mode, so retraining on a different feature set needs no API change and
+the two can never disagree. `mutation_label` is a display convenience and never
+reaches the model.
+
+**Block form.** The same request may instead name the blocks its values belong
+to. This is the shape a genomic + clinical model grows into, and it is accepted
+today:
+
+```json
+{
+  "feature_set": "merged",
+  "genomic_features":   { "mut_type": "Point", "mut_effect": "Missense" },
+  "clinical_features":  { "cli_phe": "Severe" },
+  "treatment_features": null,
+  "mutation_label": "c.1834C>T"
+}
+```
+
+The blocks are merged into one map before validation and the served model's own
+schema decides what is acceptable, so the API layer never needs to know which
+column belongs to which block. A flat request and the equivalent block request
+return the same estimate — there is a test asserting exactly that.
+
+`treatment_features` is a reserved extension point. **No served model consumes
+treatment data**, so sending values in it returns 422 rather than being accepted
+and dropped: a silently ignored field would let a caller believe treatment
+history influenced the estimate. Send `null`, or omit it.
 
 201 response:
 

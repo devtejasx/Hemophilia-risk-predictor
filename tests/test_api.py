@@ -274,6 +274,81 @@ def test_missing_required_field_returns_422(client, auth, patient_id):
     assert response.json()["detail"]["field"] == "cli_phe"
 
 
+def test_block_form_and_flat_form_give_the_same_estimate(client, auth, patient_id):
+    """The named blocks are organisational, not a different model input.
+
+    Splitting the same values across genomic_features / clinical_features must
+    produce exactly the flat request's estimate, or the contract would quietly
+    mean two different things.
+    """
+    flat = _case(client, auth, "merged")
+    schema = client.get(
+        "/api/predictions/schema?feature_set=genomic", headers=auth
+    ).json()
+    genomic_columns = set(schema["model_features"]) | set(schema["required"])
+
+    blocks = {"feature_set": "merged", "genomic_features": {}, "clinical_features": {}}
+    for column, value in flat["features"].items():
+        target = "genomic_features" if column in genomic_columns else "clinical_features"
+        blocks[target][column] = value
+
+    first = client.post(
+        f"/api/patients/{patient_id}/predictions", json=flat, headers=auth
+    )
+    second = client.post(
+        f"/api/patients/{patient_id}/predictions", json=blocks, headers=auth
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["probability"] == second.json()["probability"]
+    assert first.json()["features"] == second.json()["features"]
+
+
+def test_a_single_block_is_enough(client, auth, patient_id):
+    flat = _case(client, auth, "clinical")
+    response = client.post(
+        f"/api/patients/{patient_id}/predictions",
+        json={"feature_set": "clinical", "clinical_features": flat["features"]},
+        headers=auth,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["feature_set"] == "clinical"
+
+
+def test_populating_treatment_features_is_refused(client, auth, patient_id):
+    """Reserved, not ignored.
+
+    No served model consumes treatment data. Accepting the field and dropping it
+    would let a caller believe treatment history moved the estimate.
+    """
+    payload = _case(client, auth, "merged")
+    payload["treatment_features"] = {"exposure_days": 12}
+    response = client.post(
+        f"/api/patients/{patient_id}/predictions", json=payload, headers=auth
+    )
+    assert response.status_code == 422
+    assert "treatment_features" in response.text
+
+
+def test_an_explicitly_null_treatment_block_is_accepted(client, auth, patient_id):
+    payload = _case(client, auth, "merged")
+    payload["treatment_features"] = None
+    payload["clinical_features"] = None
+    response = client.post(
+        f"/api/patients/{patient_id}/predictions", json=payload, headers=auth
+    )
+    assert response.status_code == 201, response.text
+
+
+def test_a_request_with_no_features_at_all_returns_422(client, auth, patient_id):
+    response = client.post(
+        f"/api/patients/{patient_id}/predictions",
+        json={"feature_set": "merged"},
+        headers=auth,
+    )
+    assert response.status_code == 422
+
+
 def test_unknown_feature_set_returns_422(client, auth, patient_id):
     response = client.post(
         f"/api/patients/{patient_id}/predictions",
