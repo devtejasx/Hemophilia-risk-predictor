@@ -122,6 +122,42 @@ the backend process — a separate model service would add operational cost with
 no benefit at this size. Every model is loaded **once at startup**, not per
 request.
 
+### The seam between the API and the model
+
+The routers never name a model class. They depend on two protocols in
+`backend/services/contracts.py`:
+
+```
+        routers/predictions.py
+                 │  depends only on
+                 ▼
+   PredictionModel  ·  ExplanationProvider        ← backend/services/contracts.py
+                 ▲  satisfied structurally by
+                 │
+   ml.inference.PredictionService                 ← built in services/ml.startup()
+   ml.explainability.ExplanationService              (the only place that names them)
+```
+
+`backend/services/ml.py` is the composition root and the **only** module that
+names a concrete implementation. Swapping the served model means writing one
+class that satisfies `PredictionModel`, one that satisfies
+`ExplanationProvider`, and registering them in `startup()` — with no router,
+schema, or frontend change. `tests/test_contracts.py` fails the moment a served
+implementation stops satisfying the interface, so the seam cannot rot silently.
+
+Two things make that swap cheap in practice:
+
+* **Input.** A request may name its blocks (`genomic_features`,
+  `clinical_features`, `treatment_features`) instead of sending one flat map.
+  The blocks are merged before validation and the model's own schema decides
+  what is acceptable, so the API layer holds no column list of its own.
+  `treatment_features` is reserved: no served model consumes treatment data, so
+  populating it returns 422 rather than being silently dropped.
+* **Output.** Explanations are reported against **source column names** with a
+  generic `feature / label / value / supplied / contribution / direction` shape,
+  so the frontend renders any model's explanation without knowing its feature
+  space.
+
 ## Dataset
 
 Two supplementary tables of the source publication, in `ml/data/`. The files are
@@ -489,7 +525,10 @@ frontend/            React + TypeScript + Vite SPA (the production UI)
 backend/             one FastAPI application
   core/              config, security
   routers/           auth, patients, predictions, analytics
-  services/ml.py     adapter over the ml package; one service per mode
+  services/contracts.py  the PredictionModel / ExplanationProvider protocols
+                         the routers are written against
+  services/ml.py     composition root: builds the models, hands them out as
+                     those protocols; one service per mode
   db.py              the single SQLite layer; its migration renames a superseded
                      schema's tables aside (legacy_pre_mmc_*) with data intact
 ml/
@@ -503,7 +542,7 @@ ml/
 scripts/
   validate_dataset.py         dataset report, exits non-zero on a bad file
   train_inhibitor_model.py    merge -> aggregate -> split -> train -> evaluate -> save
-tests/               230 tests, including end-to-end
+tests/               tests, including end-to-end and the interface seam
 docker/              Dockerfiles, compose, nginx
 docs/                CANONICAL.md · ML.md · API.md
 archive/             superseded implementations, kept for provenance; nothing
