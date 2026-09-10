@@ -59,11 +59,12 @@ const Analytics: React.FC = () => {
     name,
     value,
   }))
-  const variantData = Object.entries(data?.variant_type_distribution ?? {}).map(
+  const mutationData = Object.entries(data?.mutation_type_distribution ?? {}).map(
     ([name, value]) => ({ name, value })
   )
+  // Show the human label, not the raw source column name.
   const importanceData = (importance?.features ?? []).map((f) => ({
-    name: f.feature,
+    name: f.label || f.feature,
     value: Number(f.importance.toFixed(4)),
   }))
 
@@ -84,7 +85,7 @@ const Analytics: React.FC = () => {
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
           {importance?.available
-            ? `${importance.method}. This describes the model overall, not any individual patient.`
+            ? `${importance.method}. This describes the model overall — not any single mutation, and not any individual patient.`
             : `Unavailable: ${importance?.reason ?? 'unknown reason'}`}
         </p>
         {importanceData.length > 0 && (
@@ -132,16 +133,16 @@ const Analytics: React.FC = () => {
 
         <div>
           <h2 className="font-semibold text-slate-900 dark:text-white mb-3">
-            Variant types you have assessed
+            Mutation types you have assessed
           </h2>
-          {variantData.length === 0 ? (
+          {mutationData.length === 0 ? (
             <p className="text-sm text-slate-500 dark:text-slate-400">
               No estimates recorded yet.
             </p>
           ) : (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={variantData}>
+                <BarChart data={mutationData}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
                   <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />

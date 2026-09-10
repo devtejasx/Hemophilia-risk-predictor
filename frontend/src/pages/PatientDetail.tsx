@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Loader2, Dna, History } from 'lucide-react'
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import {
   patientAPI,
   predictionAPI,
@@ -9,12 +19,13 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
-import { Disclaimer, VariantLevelNote } from '@/components/Disclaimer'
-import GenomicForm from '@/components/GenomicForm'
+import { Disclaimer, MutationLevelNote } from '@/components/Disclaimer'
+import PredictionForm from '@/components/PredictionForm'
 
 /**
- * One patient: their record, the genomic input form, and the full history of
- * estimates made for them.
+ * One patient: their record, the inhibitor-risk input form, and the full
+ * history of estimates recorded against them. Each estimate describes the
+ * mutation that was entered, not the patient.
  */
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -24,6 +35,23 @@ const PatientDetail: React.FC = () => {
   const [history, setHistory] = useState<Prediction[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * The stored estimates in the order they were made. Nothing is interpolated
+   * or back-filled: one point per prediction actually recorded, so a gap in the
+   * line is a gap in the record.
+   */
+  const trend = useMemo(
+    () =>
+      [...history].reverse().map((p, index) => ({
+        index: index + 1,
+        probability: Number((p.probability * 100).toFixed(1)),
+        created_at: p.created_at,
+        feature_set: p.feature_set,
+      })),
+    [history]
+  )
+  const threshold = history.length ? history[0].threshold * 100 : null
 
   const refresh = useCallback(async () => {
     const [p, h] = await Promise.all([
@@ -93,17 +121,77 @@ const PatientDetail: React.FC = () => {
           <Dna className="w-4 h-4" /> New risk estimate
         </h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-          Enter the F8 variant as described in CHAMP. Options are limited to values the
-          model was actually trained on.
+          Describe the F8 mutation (MMC2), the clinical findings reported for
+          it (MMC3), or both. Options are limited to values the model was
+          actually fitted on.
         </p>
-        <GenomicForm patientId={patientId} onPredicted={refresh} />
+        <PredictionForm patientId={patientId} onPredicted={refresh} />
       </section>
 
       <section>
         <h2 className="flex items-center gap-2 font-semibold text-slate-900 dark:text-white mb-1">
           <History className="w-4 h-4" /> Prediction history
         </h2>
-        <VariantLevelNote />
+        <MutationLevelNote />
+
+        {trend.length >= 2 && threshold !== null && (
+          <div className="mt-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+            <h3 className="text-sm font-medium text-slate-900 dark:text-white">
+              Estimates over time
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+              Each point is one recorded estimate, in the order it was made. The
+              dashed line is the model's decision threshold. Points may come from
+              different input modes, so a change between them reflects what was
+              entered, not a change in the mutation.
+            </p>
+            <div className="h-56">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trend} margin={{ top: 4, right: 8, bottom: 4, left: -12 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis dataKey="index" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    domain={[0, 100]}
+                    unit="%"
+                    tick={{ fontSize: 11 }}
+                    width={48}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => [`${value}%`, 'Estimated risk']}
+                    labelFormatter={(index: number) => {
+                      const point = trend[Number(index) - 1]
+                      return point ? `${point.created_at} · ${point.feature_set}` : ''
+                    }}
+                  />
+                  <ReferenceLine
+                    y={threshold}
+                    stroke="#94a3b8"
+                    strokeDasharray="4 4"
+                    label={{
+                      value: `threshold ${threshold.toFixed(1)}%`,
+                      position: 'insideTopRight',
+                      fontSize: 10,
+                      fill: '#94a3b8',
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="probability"
+                    stroke="#8b5cf6"
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {trend.length === 1 && (
+          <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+            One estimate recorded. A trend appears once there are at least two.
+          </p>
+        )}
 
         {history.length === 0 ? (
           <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
@@ -130,7 +218,8 @@ const PatientDetail: React.FC = () => {
                   </Link>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {p.created_at} · model {p.model_version}
+                  {p.created_at} · {p.feature_set} · model {p.model_version}
+                  {p.mutation_label ? ' · ' + p.mutation_label : ''}
                 </p>
               </li>
             ))}

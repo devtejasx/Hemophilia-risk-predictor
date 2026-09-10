@@ -1,4 +1,4 @@
-# Runtime dependencies: FastAPI backend + CHAMP inference + explanations.
+# Runtime dependencies: FastAPI backend + MMC2/MMC3 inference + explanations.
 # Training-only and test-only dependencies live in requirements-dev.txt.
 #
 # scikit-learn is pinned exactly: the serialised artifacts under ml/artifacts/
@@ -21,6 +21,10 @@ pandas==2.3.3
 numpy==2.3.3
 scikit-learn==1.8.0
 xgboost==3.2.0
+# catboost is a RUNTIME dependency, not just a training one: the fused
+# mmc2-mmc3-v1 artifact is a calibrated CatBoost model, so unpickling it at
+# inference needs the library present.
+catboost==1.2.10
 joblib==1.5.3
 
 # --- Explainability ---

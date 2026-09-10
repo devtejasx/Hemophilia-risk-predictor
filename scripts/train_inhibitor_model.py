@@ -1,0 +1,722 @@
+"""Train and evaluate the MMC2 + MMC3 inhibitor-risk models.
+
+    python scripts/train_inhibitor_model.py                    # all three sets
+    python scripts/train_inhibitor_model.py --feature-set merged
+    python scripts/train_inhibitor_model.py --seed 7 --version-suffix v2
+
+Pipeline order matters and is enforced here::
+
+    load MMC2 + MMC3 -> validate -> filter F8 -> encode target
+         -> merge on mut_id
+         -> AGGREGATE to one row per mutation, dropping conflicting labels
+         -> GROUPED SPLIT (mut_id never crosses a split boundary)
+         -> resolve feature sets from the columns that actually exist
+         -> fit preprocessor on TRAIN ONLY
+         -> model selection by grouped cross-validated ROC-AUC
+         -> isotonic calibration on train, using the same grouped folds
+         -> choose the decision threshold on the VALIDATION split
+         -> evaluate ONCE on the held-out test split
+         -> write model + preprocessor + background + metadata + metrics
+
+Every number in metrics.json comes from this run. Nothing is copied from a
+report or hand-edited.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import platform
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import sklearn  # noqa: E402
+from imblearn.over_sampling import SMOTE  # noqa: E402
+from imblearn.pipeline import Pipeline as ImbPipeline  # noqa: E402
+from sklearn.calibration import CalibratedClassifierCV  # noqa: E402
+from sklearn.ensemble import RandomForestClassifier  # noqa: E402
+from sklearn.linear_model import LogisticRegression  # noqa: E402
+from sklearn.metrics import (  # noqa: E402
+    accuracy_score,
+    average_precision_score,
+    balanced_accuracy_score,
+    brier_score_loss,
+    confusion_matrix,
+    f1_score,
+    matthews_corrcoef,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import (  # noqa: E402
+    GroupShuffleSplit,
+    StratifiedGroupKFold,
+    cross_validate,
+)
+from sklearn.neural_network import MLPClassifier  # noqa: E402
+from sklearn.svm import SVC  # noqa: E402
+from xgboost import XGBClassifier  # noqa: E402
+from lightgbm import LGBMClassifier  # noqa: E402
+from catboost import CatBoostClassifier  # noqa: E402
+
+from ml.preprocessing import hemophilia_a as ha  # noqa: E402
+
+PREPROCESSING_VERSION = "mmc2-mmc3-preprocessing-1"
+DATASET_NAME = "MMC2+MMC3"
+
+#: Artifact name per feature set. The name says which source table the model
+#: sees, so a served version can never be mistaken for one fitted on a
+#: different block.
+VERSION_NAMES: dict[str, str] = {
+    "genomic": "mmc2-genomic",
+    "clinical": "mmc3-clinical",
+    "merged": "mmc2-mmc3",
+}
+
+
+# --------------------------------------------------------------------------
+# Models
+# --------------------------------------------------------------------------
+
+
+def candidate_models(seed: int, positive_rate: float) -> dict[str, object]:
+    """The families compared before one is fitted.
+
+    Every family is given the class imbalance explicitly rather than being left
+    to learn it: at a ~20% positive rate an unweighted fit on this data can
+    reach ~0.80 accuracy by answering "no inhibitor" to everything. The weight
+    is computed from the split actually being trained on, not assumed.
+
+    SMOTE appears only inside an imbalanced-learn pipeline, so resampling
+    happens within each cross-validation fold and never touches the fold being
+    scored. It is never applied before the split.
+    """
+    pos_weight = (1 - positive_rate) / positive_rate if positive_rate else 1.0
+
+    return {
+        "logistic_regression": LogisticRegression(
+            max_iter=5000, class_weight="balanced", random_state=seed
+        ),
+        "random_forest": RandomForestClassifier(
+            n_estimators=400,
+            max_depth=12,
+            min_samples_leaf=3,
+            class_weight="balanced_subsample",
+            random_state=seed,
+            n_jobs=-1,
+        ),
+        "xgboost": XGBClassifier(
+            n_estimators=400,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            scale_pos_weight=pos_weight,
+            eval_metric="logloss",
+            random_state=seed,
+            n_jobs=-1,
+        ),
+        "lightgbm": LGBMClassifier(
+            n_estimators=400,
+            num_leaves=15,
+            learning_rate=0.05,
+            min_child_samples=10,
+            subsample=0.9,
+            subsample_freq=1,
+            colsample_bytree=0.9,
+            class_weight="balanced",
+            random_state=seed,
+            n_jobs=-1,
+            verbose=-1,
+        ),
+        "catboost": CatBoostClassifier(
+            iterations=300,
+            depth=5,
+            learning_rate=0.05,
+            auto_class_weights="Balanced",
+            random_seed=seed,
+            verbose=0,
+            allow_writing_files=False,
+        ),
+        "svm_rbf": SVC(
+            C=1.0,
+            gamma="scale",
+            class_weight="balanced",
+            probability=False,  # calibrated downstream from decision_function
+            random_state=seed,
+        ),
+        "mlp": MLPClassifier(
+            hidden_layer_sizes=(64, 32),
+            alpha=1e-3,
+            max_iter=1000,
+            early_stopping=True,
+            n_iter_no_change=15,
+            random_state=seed,
+        ),
+        "random_forest_smote": ImbPipeline(
+            [
+                ("smote", SMOTE(random_state=seed, k_neighbors=5)),
+                (
+                    "clf",
+                    RandomForestClassifier(
+                        n_estimators=400,
+                        max_depth=12,
+                        min_samples_leaf=3,
+                        random_state=seed,
+                        n_jobs=-1,
+                    ),
+                ),
+            ]
+        ),
+    }
+
+
+# --------------------------------------------------------------------------
+# Helpers
+# --------------------------------------------------------------------------
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def grouped_split(
+    merged: pd.DataFrame, seed: int, test_size: float, val_size: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Split row indices so no ``mut_id`` appears in two partitions.
+
+    After aggregation each mutation is already a single row, so this is a
+    guarantee rather than a constraint - which is exactly why it is still
+    asserted: the assertion is what would catch a future change that reverts to
+    record-level rows and silently reintroduces the leak.
+
+    GroupShuffleSplit for train+val / test, then again for train / val with a
+    different seed for the inner split.
+    """
+    groups = merged[ha.GROUP_COLUMN].to_numpy()
+    y = merged[ha.TARGET_COLUMN].to_numpy()
+    index = np.arange(len(merged))
+
+    outer = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed)
+    fit_idx, test_idx = next(outer.split(index, y, groups=groups))
+
+    inner = GroupShuffleSplit(n_splits=1, test_size=val_size, random_state=seed + 1)
+    rel_train, rel_val = next(
+        inner.split(fit_idx, y[fit_idx], groups=groups[fit_idx])
+    )
+    return fit_idx[rel_train], fit_idx[rel_val], test_idx
+
+
+def assert_no_group_overlap(
+    merged: pd.DataFrame, train: np.ndarray, val: np.ndarray, test: np.ndarray
+) -> dict[str, int]:
+    g = merged[ha.GROUP_COLUMN]
+    gt, gv, gs = set(g.iloc[train]), set(g.iloc[val]), set(g.iloc[test])
+    overlaps = {
+        "train_validation": len(gt & gv),
+        "train_test": len(gt & gs),
+        "validation_test": len(gv & gs),
+    }
+    for pair, count in overlaps.items():
+        if count:
+            raise RuntimeError(
+                f"Group leakage: {count} mut_id values appear in both halves of "
+                f"{pair}."
+            )
+    return {
+        "train_mutations": len(gt),
+        "validation_mutations": len(gv),
+        "test_mutations": len(gs),
+        "overlaps": overlaps,
+    }
+
+
+def choose_threshold(y_true: np.ndarray, y_prob: np.ndarray) -> tuple[float, str]:
+    """Probability cut-off that maximises F1 on the validation split.
+
+    F1 rather than accuracy: at a ~17% positive rate a model that answers "no
+    inhibitor" for everyone scores 83% accuracy and is useless. (The reference
+    notebook selects on accuracy; see NOTEBOOK_DEVIATIONS.) The chosen value is
+    written to metadata, so nothing downstream assumes 0.5.
+    """
+    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
+    f1 = np.divide(
+        2 * precision[:-1] * recall[:-1],
+        precision[:-1] + recall[:-1],
+        out=np.zeros_like(precision[:-1]),
+        where=(precision[:-1] + recall[:-1]) > 0,
+    )
+    best = int(np.argmax(f1))
+    return float(thresholds[best]), "max F1 on the validation split"
+
+
+def evaluate(y_true: np.ndarray, y_prob: np.ndarray, threshold: float) -> dict:
+    pred = (y_prob >= threshold).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_true, pred, labels=[0, 1]).ravel()
+    specificity = float(tn / (tn + fp)) if (tn + fp) else 0.0
+    return {
+        "roc_auc": float(roc_auc_score(y_true, y_prob)),
+        "pr_auc": float(average_precision_score(y_true, y_prob)),
+        "brier_score": float(brier_score_loss(y_true, y_prob)),
+        "positive_rate": float(np.mean(y_true)),
+        "at_threshold": {
+            "threshold": threshold,
+            "accuracy": float(accuracy_score(y_true, pred)),
+            "balanced_accuracy": float(balanced_accuracy_score(y_true, pred)),
+            "precision": float(precision_score(y_true, pred, zero_division=0)),
+            "recall_sensitivity": float(recall_score(y_true, pred, zero_division=0)),
+            "specificity": specificity,
+            "f1": float(f1_score(y_true, pred, zero_division=0)),
+            "mcc": float(matthews_corrcoef(y_true, pred)),
+            "confusion_matrix": {
+                "tn": int(tn),
+                "fp": int(fp),
+                "fn": int(fn),
+                "tp": int(tp),
+            },
+        },
+    }
+
+
+def leakage_probe(merged: pd.DataFrame, columns: list[str]) -> dict[str, float]:
+    """Per-column association with the target, as a leakage tell-tale.
+
+    A column whose value almost determines the label is reported here so it can
+    be reviewed. Run over the features that actually reach the model, so a high
+    score is a finding, not an expectation: the known leaks (uinhibitor, type,
+    utype, assay) are already on the exclusion list and never appear.
+    """
+    y = merged[ha.TARGET_COLUMN]
+    scores: dict[str, float] = {}
+    for col in columns:
+        if col not in merged.columns:
+            continue
+        grouped = y.groupby(merged[col].astype(str).fillna("__NA__"))
+        sizes = grouped.size()
+        means = grouped.mean()
+        keep = sizes >= 10
+        if not keep.any():
+            continue
+        # Weighted mean distance from the base rate: 0 = no signal, 0.5 = the
+        # column separates the classes completely.
+        weights = sizes[keep] / sizes[keep].sum()
+        scores[col] = float((weights * (means[keep] - y.mean()).abs()).sum())
+    return dict(sorted(scores.items(), key=lambda kv: kv[1], reverse=True))
+
+
+# --------------------------------------------------------------------------
+# Training one feature set
+# --------------------------------------------------------------------------
+
+
+def train_one(
+    *,
+    merged: pd.DataFrame,
+    spec: ha.FeatureSpec,
+    train_idx: np.ndarray,
+    val_idx: np.ndarray,
+    test_idx: np.ndarray,
+    split_summary: dict,
+    seed: int,
+    version: str,
+    artifacts_root: Path,
+    dataset_block: dict,
+) -> dict:
+    out_dir = artifacts_root / version
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    X = merged[spec.columns]
+    y = merged[ha.TARGET_COLUMN].to_numpy()
+    groups = merged[ha.GROUP_COLUMN].to_numpy()
+
+    X_train, y_train = X.iloc[train_idx], y[train_idx]
+    X_val, y_val = X.iloc[val_idx], y[val_idx]
+    X_test, y_test = X.iloc[test_idx], y[test_idx]
+
+    print(f"\n{'=' * 72}\n{version}  ({spec.name}: {len(spec.columns)} source columns)\n{'=' * 72}")
+    print(f"  train {len(X_train)}   validation {len(X_val)}   test {len(X_test)}")
+    print(
+        f"  positives: train {int(y_train.sum())}  val {int(y_val.sum())}  "
+        f"test {int(y_test.sum())}"
+    )
+
+    # -- fit the preprocessor on TRAIN ONLY ------------------------------
+    preprocessor = ha.build_preprocessor(spec)
+    Xt_train = preprocessor.fit_transform(X_train)
+    Xt_val = preprocessor.transform(X_val)
+    Xt_test = preprocessor.transform(X_test)
+    feature_names = ha.encoded_feature_names(preprocessor)
+    print(f"  encoded columns: {len(feature_names)} (fitted on the training split only)")
+
+    # -- model selection, grouped 5-fold on the training split -----------
+    cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=seed)
+    folds = list(cv.split(Xt_train, y_train, groups=groups[train_idx]))
+
+    positive_rate = float(y_train.mean())
+    cv_results: dict[str, dict[str, float]] = {}
+    for name, model in candidate_models(seed, positive_rate).items():
+        scores = cross_validate(
+            model,
+            Xt_train,
+            y_train,
+            cv=folds,
+            scoring=("roc_auc", "average_precision"),
+            error_score="raise",
+        )
+        auc, ap = scores["test_roc_auc"], scores["test_average_precision"]
+        cv_results[name] = {
+            "roc_auc_mean": float(auc.mean()),
+            "roc_auc_std": float(auc.std()),
+            "pr_auc_mean": float(ap.mean()),
+            "pr_auc_std": float(ap.std()),
+        }
+        print(
+            f"    {name:22} ROC-AUC {auc.mean():.4f} +/- {auc.std():.4f}"
+            f"   PR-AUC {ap.mean():.4f}"
+        )
+
+    best_name = max(cv_results, key=lambda k: cv_results[k]["roc_auc_mean"])
+    print(f"    -> selected {best_name}")
+
+    # -- calibrate, using the same grouped folds -------------------------
+    # Isotonic on the training split only. The folds are the grouped ones, so
+    # calibration never sees a mutation in both its fit and its scoring half.
+    calibrated = CalibratedClassifierCV(
+        candidate_models(seed, positive_rate)[best_name], method="isotonic", cv=folds
+    )
+    calibrated.fit(Xt_train, y_train)
+
+    # -- threshold on the VALIDATION split -------------------------------
+    val_prob = calibrated.predict_proba(Xt_val)[:, 1]
+    threshold, criterion = choose_threshold(y_val, val_prob)
+    validation_metrics = evaluate(y_val, val_prob, threshold)
+    print(f"  threshold {threshold:.4f}  ({criterion})")
+
+    # -- evaluate ONCE on the held-out test split ------------------------
+    test_prob = calibrated.predict_proba(Xt_test)[:, 1]
+    test_metrics = evaluate(y_test, test_prob, threshold)
+    at = test_metrics["at_threshold"]
+    print(
+        f"  TEST  acc {at['accuracy']:.4f}  prec {at['precision']:.4f}  "
+        f"rec {at['recall_sensitivity']:.4f}  F1 {at['f1']:.4f}  "
+        f"ROC-AUC {test_metrics['roc_auc']:.4f}  PR-AUC {test_metrics['pr_auc']:.4f}"
+    )
+    print(f"  confusion {at['confusion_matrix']}")
+
+    metrics = {
+        "generated_by": "scripts/train_inhibitor_model.py",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "seed": seed,
+        "feature_set": spec.name,
+        "split": split_summary,
+        "cross_validation": cv_results,
+        "selected_model": best_name,
+        "threshold": {"value": threshold, "criterion": criterion},
+        "validation": validation_metrics,
+        "held_out_test": test_metrics,
+        "baselines": {
+            "majority_class_accuracy": float(1 - y_test.mean()),
+            "note": (
+                "At a ~17% positive rate a constant 'no inhibitor' answer scores "
+                "~0.83 accuracy, which is why accuracy is reported alongside "
+                "PR-AUC and recall rather than on its own."
+            ),
+        },
+    }
+
+    metadata = {
+        "model_version": version,
+        "model_type": f"CalibratedClassifierCV(isotonic) over {best_name}",
+        "training_date": datetime.now(timezone.utc).isoformat(),
+        "preprocessing_version": PREPROCESSING_VERSION,
+        "dataset": dataset_block,
+        "features": {
+            "n": len(feature_names),
+            "names": feature_names,
+            "source_columns": spec.columns,
+            "excluded_columns": ha.EXCLUDED_COLUMNS,
+            **spec.as_dict(),
+        },
+        "split": split_summary,
+        "calibration": {
+            "method": "isotonic",
+            "cv": "StratifiedGroupKFold(5) on mut_id",
+            "fitted_on": "training split",
+        },
+        "threshold": {
+            "value": threshold,
+            "selected_on": "validation split",
+            "criterion": criterion,
+        },
+        "test_metrics": test_metrics,
+        "library_versions": {
+            "python": platform.python_version(),
+            "scikit_learn": sklearn.__version__,
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+        },
+        "pipeline_decisions": list(ha.PIPELINE_DECISIONS),
+        "limitations": [
+            "The unit is a mutation, not a patient. An estimate describes how "
+            "often this mutation is reported with an inhibitor in the published "
+            "literature behind MMC3, not an individual's risk.",
+            f"{dataset_block['labels']['n_excluded_unlabelled']} MMC3 records "
+            "without an explicit Yes/No inhibitor value were excluded, leaving "
+            f"{dataset_block['population']['n_mutations_unknown']} F8 mutations "
+            "with no usable label at all. That exclusion is unlikely to be "
+            "random, so metrics describe the reported subset of this dataset, "
+            "not population incidence.",
+            f"{dataset_block['population']['n_conflicting_excluded']} mutations "
+            "whose clinical records disagree about the outcome were excluded "
+            "rather than resolved by majority vote. Those are plausibly the "
+            "hardest cases, so the modelled population is easier than the whole.",
+            "uinhibitor, type, utype and assay are excluded as leakage: each "
+            "either mirrors the label or exists only because inhibitor testing "
+            "was performed. See metadata.features.excluded_columns for the full "
+            "list and the reason for each.",
+            "Clinical aggregates come from a median of 1 record per mutation "
+            "(max "
+            f"{dataset_block['mutation_level']['records_per_mutation_max']}), so "
+            "for most mutations the mean, median, min and max coincide.",
+            "No external validation cohort. Not clinically validated.",
+        ],
+    }
+
+    joblib.dump(calibrated, out_dir / "model.joblib")
+    joblib.dump(preprocessor, out_dir / "preprocessor.joblib")
+    (out_dir / "metadata.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
+    (out_dir / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+    # Background sample for SHAP/LIME, drawn from the TRAINING split only.
+    rng = np.random.default_rng(seed)
+    picks = rng.choice(
+        len(Xt_train), size=min(200, len(Xt_train)), replace=False
+    )
+    np.save(out_dir / "background.npy", np.asarray(Xt_train)[picks])
+
+    print(f"  wrote {out_dir}")
+    return {"version": version, "metrics": metrics, "metadata": metadata}
+
+
+# --------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--feature-set",
+        choices=[*ha.FEATURE_SET_NAMES, "all"],
+        default="all",
+        help="Which block to train. Default trains genomic, clinical and merged.",
+    )
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--test-size", type=float, default=0.20)
+    parser.add_argument("--val-size", type=float, default=0.20)
+    parser.add_argument("--mmc2", default=None, help="Overrides MMC2_PATH")
+    parser.add_argument("--mmc3", default=None, help="Overrides MMC3_PATH")
+    parser.add_argument("--artifacts-dir", default=None, help="Overrides ml/artifacts")
+    parser.add_argument(
+        "--version-suffix",
+        default="v1",
+        help="Artifact version becomes mmc2-mmc3-<suffix> and friends.",
+    )
+    args = parser.parse_args()
+
+    seed = args.seed
+    np.random.seed(seed)
+    artifacts_root = Path(args.artifacts_dir or (REPO_ROOT / "ml" / "artifacts"))
+
+    print("=" * 72)
+    print("Hemophilia A inhibitor-risk training  (MMC2 + MMC3, mutation-level)")
+    print("=" * 72)
+
+    # -- 1. load, validate, merge, aggregate -----------------------------
+    p2 = Path(args.mmc2) if args.mmc2 else ha.mmc2_path()
+    p3 = Path(args.mmc3) if args.mmc3 else ha.mmc3_path()
+    bundle = ha.load_mutation_table(p2, p3)
+    mutations, labels, merge_report = bundle.mutations, bundle.labels, bundle.merge
+    population = bundle.population()
+
+    print("\n[1] Sources")
+    for report in bundle.sources:
+        print(
+            f"    {report.name:5} {report.n_rows:6} rows  {report.n_columns:3} cols  "
+            f"{report.n_unique_mut_id:5} unique mut_id  "
+            f"{report.n_duplicate_rows} duplicate rows  "
+            f"{report.n_duplicate_mut_id} repeated mut_id  "
+            f"{report.missing_values_total} missing values"
+        )
+    print(
+        f"    labels    {labels.n_labelled} explicit Yes/No "
+        f"({labels.n_positive} positive, {labels.positive_rate:.2%}); "
+        f"{labels.n_excluded_unlabelled} excluded {labels.excluded_values}"
+    )
+
+    print("\n[2] Merge on mut_id")
+    for key, value in merge_report.as_dict().items():
+        if key not in ("case_collapses",):
+            print(f"    {key:28} {value}")
+
+    print("\n[3] Fusion to one row per mutation")
+    for key, value in population.items():
+        print(f"    {key:32} {value}")
+
+    # -- 2. GROUPED SPLIT, before anything is fitted ---------------------
+    train_idx, val_idx, test_idx = grouped_split(
+        mutations, seed, args.test_size, args.val_size
+    )
+    group_summary = assert_no_group_overlap(mutations, train_idx, val_idx, test_idx)
+    split_summary = {
+        "strategy": (
+            "GroupShuffleSplit on mut_id (80/20, then 80/20 of the remainder), "
+            "over the mutation-level table"
+        ),
+        "unit": "one F8 mutation",
+        "seed": seed,
+        "train": int(len(train_idx)),
+        "validation": int(len(val_idx)),
+        "test": int(len(test_idx)),
+        "train_positive": int(mutations[ha.TARGET_COLUMN].iloc[train_idx].sum()),
+        "validation_positive": int(mutations[ha.TARGET_COLUMN].iloc[val_idx].sum()),
+        "test_positive": int(mutations[ha.TARGET_COLUMN].iloc[test_idx].sum()),
+        "unique_mutations": int(mutations[ha.GROUP_COLUMN].nunique()),
+        **group_summary,
+    }
+    print("\n[4] Grouped split (mut_id never crosses a boundary)")
+    for key in (
+        "train",
+        "validation",
+        "test",
+        "unique_mutations",
+        "train_mutations",
+        "validation_mutations",
+        "test_mutations",
+        "overlaps",
+    ):
+        print(f"    {key:20} {split_summary[key]}")
+
+    # -- 3. feature sets, resolved on the TRAINING split alone -----------
+    # Both arguments are the training split, so nothing about the validation or
+    # test rows decides which columns become features or which are marked
+    # required. This is stricter than it needs to be -- the resolved sets are
+    # identical either way on this data -- but "the feature space was chosen
+    # without looking at the test set" is a property worth holding by
+    # construction rather than by coincidence.
+    training_rows = mutations.iloc[train_idx]
+    specs = ha.build_feature_specs(training_rows, training_rows)
+    print("\n[5] Feature sets")
+    for name, spec in specs.items():
+        print(
+            f"    {name:9} {len(spec.columns):3} model features from "
+            f"{len(spec.inputs):2} source fields "
+            f"({len(spec.categorical)} categorical, {len(spec.numeric)} numeric)"
+        )
+
+    probe = leakage_probe(mutations, list(specs["merged"].columns))
+    print("\n[6] Leakage probe (weighted |class rate - base rate|, top 6)")
+    for col, score in list(probe.items())[:6]:
+        print(f"    {col:24} {score:.4f}")
+    identifiers = ha.identifier_like_columns(mutations, specs["merged"].columns)
+    print(
+        f"    identifier-like features reaching the model: "
+        f"{identifiers or 'none'}"
+    )
+
+    dataset_block = {
+        "name": DATASET_NAME,
+        "description": (
+            "Hemophilia A supplementary tables MMC2 (mutation description) and "
+            "MMC3 (clinical records), joined on mut_id and aggregated to one "
+            "row per mutation."
+        ),
+        "files": {
+            "mmc2": {
+                "path": str(p2.relative_to(REPO_ROOT)) if p2.is_relative_to(REPO_ROOT) else str(p2),
+                "sha256": file_sha256(p2),
+            },
+            "mmc3": {
+                "path": str(p3.relative_to(REPO_ROOT)) if p3.is_relative_to(REPO_ROOT) else str(p3),
+                "sha256": file_sha256(p3),
+            },
+        },
+        "join": {"key": ha.GROUP_COLUMN, "how": "inner", "genomic_rows_per_mutation": 1},
+        "unit_of_observation": "one F8 mutation",
+        "group_key": ha.GROUP_COLUMN,
+        "label_column": ha.LABEL_COLUMN,
+        "labels": labels.as_dict(),
+        "merge": merge_report.as_dict(),
+        "mutation_level": bundle.groups.as_dict(),
+        "population": population,
+        "leakage_probe": probe,
+    }
+
+    wanted = ha.FEATURE_SET_NAMES if args.feature_set == "all" else (args.feature_set,)
+    results = []
+    for name in wanted:
+        results.append(
+            train_one(
+                merged=mutations,
+                spec=specs[name],
+                train_idx=train_idx,
+                val_idx=val_idx,
+                test_idx=test_idx,
+                split_summary=split_summary,
+                seed=seed,
+                version=f"{VERSION_NAMES[name]}-{args.version_suffix}",
+                artifacts_root=artifacts_root,
+                dataset_block=dataset_block,
+            )
+        )
+
+    print("\n" + "=" * 72)
+    print("Held-out test set summary (each split touched once)")
+    print("=" * 72)
+    header = f"{'version':22}{'acc':>8}{'prec':>8}{'rec':>8}{'F1':>8}{'ROC-AUC':>10}{'PR-AUC':>9}"
+    print(header)
+    for result in results:
+        test = result["metrics"]["held_out_test"]
+        at = test["at_threshold"]
+        print(
+            f"{result['version']:22}{at['accuracy']:>8.4f}{at['precision']:>8.4f}"
+            f"{at['recall_sensitivity']:>8.4f}{at['f1']:>8.4f}"
+            f"{test['roc_auc']:>10.4f}{test['pr_auc']:>9.4f}"
+        )
+
+    summary_path = artifacts_root / "training_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "dataset": dataset_block,
+                "split": split_summary,
+                "models": {
+                    r["version"]: r["metrics"]["held_out_test"] for r in results
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"\nWrote {summary_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

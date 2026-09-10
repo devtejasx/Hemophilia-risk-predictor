@@ -18,7 +18,7 @@ services:
       - DEBUG=false
       - DATABASE_PATH=/data/hemophilia.db
       - CORS_ORIGINS=http://localhost:3000
-      - ML_MODEL_VERSION=${ML_MODEL_VERSION:-champ-v1}
+      - ML_DEFAULT_FEATURE_SET=${ML_DEFAULT_FEATURE_SET:-merged}
       # Required. Provide via docker/.env or the shell; there is no default.
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       - BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL:-}

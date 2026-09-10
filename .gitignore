@@ -40,3 +40,6 @@ logs/
 Thumbs.db
 .vscode/
 .idea/
+
+# Scratch file written by experiments/ runs
+.exp_path_tmp

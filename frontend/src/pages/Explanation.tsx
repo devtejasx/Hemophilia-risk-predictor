@@ -9,7 +9,7 @@ import {
 } from '@/services/api-client'
 import { errorMessage } from '@/services/api'
 import RiskBadge from '@/components/RiskBadge'
-import { Disclaimer } from '@/components/Disclaimer'
+import { Disclaimer, MutationLevelNote } from '@/components/Disclaimer'
 
 const ContributionBar: React.FC<{ value: number; max: number }> = ({ value, max }) => {
   const width = max === 0 ? 0 : (Math.abs(value) / max) * 100
@@ -66,14 +66,21 @@ const MethodPanel: React.FC<{ title: string; note: string; data?: MethodExplanat
         {data.contributions.map((c) => (
           <li key={c.feature}>
             <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="text-slate-900 dark:text-white">{c.feature}</span>
+              <span className="text-slate-900 dark:text-white">
+                {c.label || c.feature}
+              </span>
               <span className="text-slate-500 dark:text-slate-400 text-xs text-right">
-                {String(c.value ?? '—')}
+                {c.supplied ? String(c.value ?? '—') : 'not reported'}
               </span>
             </div>
             <ContributionBar value={c.contribution} max={max} />
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 tabular-nums">
-              {c.direction === 'increases' ? 'Increases' : 'Decreases'} the estimate
+              {c.direction === 'increases'
+                ? 'Increases'
+                : c.direction === 'decreases'
+                  ? 'Decreases'
+                  : 'No effect on'}{' '}
+              the estimate
               {' · '}
               {c.contribution >= 0 ? '+' : ''}
               {c.contribution.toFixed(4)}
@@ -151,6 +158,10 @@ const Explanation: React.FC = () => {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
           Why the model produced this estimate
         </h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+          Which parts of the MMC2 mutation description and the MMC3 clinical
+          record moved this mutation&rsquo;s estimate, and in which direction.
+        </p>
       </div>
 
       <div className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
@@ -163,6 +174,9 @@ const Explanation: React.FC = () => {
         <p className="mt-3 text-sm text-slate-700 dark:text-slate-300">
           {prediction.interpretation}
         </p>
+        <div className="mt-2">
+          <MutationLevelNote />
+        </div>
       </div>
 
       <p className="text-sm text-slate-600 dark:text-slate-300">

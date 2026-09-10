@@ -17,9 +17,12 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import joblib
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle avoidance
+    from ml.preprocessing.hemophilia_a import FeatureSpec
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +65,26 @@ class ArtifactBundle:
         return float(value)
 
     @property
-    def is_trained_on_champ(self) -> bool:
-        return self.metadata.get("dataset", {}).get("name") == "CHAMP"
+    def dataset_name(self) -> str:
+        """The dataset the bundle records having been fitted on."""
+        return str(self.metadata.get("dataset", {}).get("name", "unknown"))
+
+    @property
+    def feature_set(self) -> str:
+        """Which block this version consumes: genomic, clinical or merged."""
+        return str(self.metadata.get("features", {}).get("feature_set", "merged"))
+
+    @property
+    def feature_spec(self) -> "FeatureSpec":
+        """The exact columns and their treatment, rebuilt from metadata.
+
+        Inference reconstructs the training column list from the artifact rather
+        than re-reading the dataset, so a served model cannot drift away from
+        the feature set it was fitted on.
+        """
+        from ml.preprocessing.hemophilia_a import FeatureSpec
+
+        return FeatureSpec.from_dict(self.metadata.get("features", {}))
 
     @property
     def provenance_warning(self) -> str | None:
@@ -177,8 +198,3 @@ def _verify_consistency(bundle: ArtifactBundle) -> None:
             f"features but the estimator expects {actual}"
         )
 
-
-def clear_cache() -> None:
-    """Drop cached bundles. Used by tests; not called by the application."""
-    with _lock:
-        _cache.clear()

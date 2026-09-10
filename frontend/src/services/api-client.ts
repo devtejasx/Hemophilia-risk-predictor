@@ -27,39 +27,52 @@ export interface Patient {
   prediction_count: number
   latest_probability?: number | null
   latest_risk_category?: string | null
+  latest_risk?: string | null
 }
 
-/** A CHAMP-compatible F8 variant. Keys are the CHAMP column names. */
-export interface GenomicInput {
-  'Variant Type': string
-  Mechanism: string
-  Domain: string
-  Subtype: string
-  'In Poly A': string
-  'Reported Clinical Severity': string
-  exon_number?: number | null
-  codon_number?: number | null
-  is_intron?: boolean
+/** The three prediction modes: MMC2 only, MMC3 only, or both. */
+export type FeatureSet = 'genomic' | 'clinical' | 'merged'
+
+/**
+ * One record to score.
+ *
+ * `features` is keyed by MMC2/MMC3 source column name. The accepted keys are
+ * deliberately not fixed in TypeScript: they are whatever the served model's
+ * schema reports for the chosen mode, so a retrained model needs no client
+ * change and the two can never disagree.
+ */
+export interface CaseInput {
+  feature_set: FeatureSet
+  features: Record<string, string | number>
+  mutation_label?: string
 }
 
 export interface Prediction {
   id: number
   patient_id: number
+  prediction: 0 | 1
+  risk: 'Low' | 'High'
   probability: number
   risk_category: string
   threshold: number
   model_version: string
+  feature_set: FeatureSet
   preprocessing_version: string
   created_at: string
   interpretation: string
+  features: Record<string, string | number>
+  mutation_label?: string | null
   disclaimer: string
 }
 
 export interface Contribution {
   feature: string
+  label: string
   value: unknown
+  /** False when the field was left blank; its absence still moved the estimate. */
+  supplied: boolean
   contribution: number
-  direction: 'increases' | 'decreases'
+  direction: 'increases' | 'decreases' | 'no effect'
 }
 
 export interface MethodExplanation {
@@ -74,6 +87,7 @@ export interface MethodExplanation {
 export interface Explanation {
   prediction_id: number
   model_version: string
+  feature_set: FeatureSet
   unit_of_explanation: string
   shap?: MethodExplanation | null
   lime?: MethodExplanation | null
@@ -85,18 +99,29 @@ export interface Analytics {
   total_predictions: number
   mean_probability?: number | null
   risk_distribution: Record<string, number>
-  variant_type_distribution: Record<string, number>
+  mutation_type_distribution: Record<string, number>
+  feature_set_distribution: Record<string, number>
   model_version: string
   note: string
 }
 
-/** The vocabulary the model was actually fitted on. */
+/** What one prediction mode accepts, straight from the fitted model. */
 export interface PredictionSchema {
   model_version: string
+  feature_set: FeatureSet
+  available_feature_sets: FeatureSet[]
+  default_feature_set: FeatureSet
+  /** Field -> the values that received their own encoded column. */
   categorical: Record<string, string[]>
   numeric: Record<string, { description: string; required: boolean }>
-  boolean: Record<string, { description: string; required: boolean }>
+  /** Field -> human-readable name, so the UI never shows a raw column name. */
+  labels: Record<string, string>
+  /** Field -> which form section it belongs in. */
+  groups: Record<string, 'genomic' | 'clinical'>
+  /** Fields where a value the model has not seen is accepted, not rejected. */
+  open_vocabulary: string[]
   required: string[]
+  optional: string[]
 }
 
 export interface GlobalImportance {
@@ -105,8 +130,9 @@ export interface GlobalImportance {
   reason?: string
   method?: string
   basis?: string
+  feature_set?: FeatureSet
   n_background?: number
-  features?: Array<{ feature: string; importance: number }>
+  features?: Array<{ feature: string; label: string; importance: number }>
 }
 
 /* ------------------------------------------------------------------ */
@@ -143,17 +169,16 @@ export const patientAPI = {
     const { data } = await apiClient.post<Patient>('/patients', payload)
     return data
   },
-  remove: async (id: number) => {
-    await apiClient.delete(`/patients/${id}`)
-  },
 }
 
 export const predictionAPI = {
-  schema: async () => {
-    const { data } = await apiClient.get<PredictionSchema>('/predictions/schema')
+  schema: async (featureSet?: FeatureSet) => {
+    const { data } = await apiClient.get<PredictionSchema>('/predictions/schema', {
+      params: featureSet ? { feature_set: featureSet } : undefined,
+    })
     return data
   },
-  create: async (patientId: number, input: GenomicInput) => {
+  create: async (patientId: number, input: CaseInput) => {
     const { data } = await apiClient.post<Prediction>(
       `/patients/${patientId}/predictions`,
       input
@@ -174,8 +199,10 @@ export const predictionAPI = {
     )
     return data
   },
-  globalImportance: async () => {
-    const { data } = await apiClient.get<GlobalImportance>('/explanations/global')
+  globalImportance: async (featureSet?: FeatureSet) => {
+    const { data } = await apiClient.get<GlobalImportance>('/explanations/global', {
+      params: featureSet ? { feature_set: featureSet } : undefined,
+    })
     return data
   },
 }

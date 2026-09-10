@@ -3,6 +3,11 @@
 The prediction path stays fast: it validates, transforms, predicts and persists.
 Explanations are computed at their own endpoint and cached in the database, so
 a slow explainer never delays a prediction.
+
+Three prediction modes are served, matching the feature blocks in
+`genomic` (MMC2 only), `clinical` (MMC3 only) and `merged`
+(both). Each is a separately trained artifact; the caller picks one per request
+and the response says which answered.
 """
 
 from __future__ import annotations
@@ -15,8 +20,8 @@ from backend import db
 from backend.routers.auth import get_current_user
 from backend.routers.patients import _require_patient
 from backend.schemas import (
+    CaseInput,
     ExplanationResponse,
-    GenomicInput,
     MethodExplanation,
     PredictionResponse,
 )
@@ -31,14 +36,24 @@ VALID_METHODS = {"shap", "lime"}
 
 
 @router.get("/predictions/schema")
-def prediction_input_schema(current_user: dict = Depends(get_current_user)) -> dict:
-    """The accepted values for each genomic field.
+def prediction_input_schema(
+    feature_set: str | None = Query(
+        None, description="genomic, clinical or merged. Defaults to the server's mode."
+    ),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """The fields one prediction mode accepts, and the values it was fitted on.
 
     The frontend builds its form from this, so the UI cannot offer a category
-    the model was never fitted on.
+    the model was never fitted on, and never has to hardcode a column list.
     """
     try:
-        return {"model_version": ml.model_version(), **ml.input_schema()}
+        return {
+            "model_version": ml.model_version(feature_set),
+            "available_feature_sets": ml.available_feature_sets(),
+            "default_feature_set": ml.default_feature_set(),
+            **ml.input_schema(feature_set),
+        }
     except ArtifactError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
@@ -52,13 +67,13 @@ def prediction_input_schema(current_user: dict = Depends(get_current_user)) -> d
 )
 def create_prediction(
     patient_id: int,
-    payload: GenomicInput,
+    payload: CaseInput,
     current_user: dict = Depends(get_current_user),
 ) -> PredictionResponse:
     _require_patient(patient_id, current_user["id"])
 
     try:
-        service = ml.prediction_service()
+        service = ml.prediction_service(payload.feature_set)
     except ArtifactError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
@@ -72,7 +87,7 @@ def create_prediction(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
-                "error": "invalid_genomic_input",
+                "error": "invalid_case_input",
                 "detail": str(exc),
                 "field": exc.field,
                 "allowed_values": exc.allowed,
@@ -83,8 +98,10 @@ def create_prediction(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
 
-    profile_id = db.create_genomic_profile(patient_id, features)
-    prediction_id = db.create_prediction(patient_id, profile_id, result)
+    record_id = db.create_case_record(
+        patient_id, result["feature_set"], features, payload.mutation_label
+    )
+    prediction_id = db.create_prediction(patient_id, record_id, result)
     db.write_audit_log(
         current_user["id"], "prediction.create", "predictions", prediction_id
     )
@@ -133,34 +150,50 @@ def get_explanation(
     if not refresh:
         cached = db.get_explanations(prediction_id)
         if {"shap", "lime"} <= set(cached):
+            db.write_audit_log(
+                current_user["id"], "explanation.access", "predictions", prediction_id
+            )
             return ExplanationResponse(
                 prediction_id=prediction_id,
                 model_version=stored["model_version"],
+                feature_set=stored["feature_set"],
                 unit_of_explanation=cached["shap"].get("unit_of_explanation", ""),
                 shap=MethodExplanation(**_strip(cached["shap"])),
                 lime=MethodExplanation(**_strip(cached["lime"])),
             )
 
+    feature_set = stored["feature_set"]
     try:
-        service = ml.prediction_service()
-        explainer = ml.explanation_service()
+        service = ml.prediction_service(feature_set)
+        explainer = ml.explanation_service(feature_set)
     except ArtifactError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
 
-    features = _features_from_row(stored)
-    try:
-        matrix = service.transform(features)
-    except InputValidationError as exc:
-        # A stored profile that no longer validates means the served model
-        # version changed since the prediction was made.
+    if service.version != stored["model_version"]:
+        # Explaining a stored prediction with a different model would attribute
+        # one model's probability to another model's feature effects.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"This prediction was made with model '{stored['model_version']}' "
-                f"and cannot be explained by the currently loaded model "
-                f"'{ml.model_version()}': {exc}"
+                f"and the server now serves '{service.version}' for the "
+                f"'{feature_set}' mode. Re-run the prediction to explain it."
+            ),
+        )
+
+    features = stored["features"]
+    try:
+        matrix = service.transform(features)
+    except InputValidationError as exc:
+        # A stored record that no longer validates means the served vocabulary
+        # changed since the prediction was made.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"The stored input for prediction {prediction_id} is no longer "
+                f"valid for model '{service.version}': {exc}"
             ),
         ) from exc
 
@@ -170,10 +203,14 @@ def get_explanation(
         db.save_explanation(
             prediction_id, method, {**computed[method], "unit_of_explanation": unit}
         )
+    db.write_audit_log(
+        current_user["id"], "explanation.compute", "predictions", prediction_id
+    )
 
     return ExplanationResponse(
         prediction_id=prediction_id,
         model_version=stored["model_version"],
+        feature_set=feature_set,
         unit_of_explanation=unit,
         shap=MethodExplanation(**_strip(computed["shap"])),
         lime=MethodExplanation(**_strip(computed["lime"])),
@@ -181,15 +218,21 @@ def get_explanation(
 
 
 @router.get("/explanations/global")
-def global_explanation(current_user: dict = Depends(get_current_user)) -> dict:
+def global_explanation(
+    feature_set: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     """Model-wide feature importance. Describes the model, not any patient."""
     try:
-        explainer = ml.explanation_service()
+        explainer = ml.explanation_service(feature_set)
     except ArtifactError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
         ) from exc
-    return {"model_version": ml.model_version(), **explainer.global_importance()}
+    return {
+        "model_version": ml.model_version(feature_set),
+        **explainer.global_importance(),
+    }
 
 
 # --------------------------------------------------------------------------
@@ -201,31 +244,25 @@ def _strip(payload: dict) -> dict:
     return {k: v for k, v in payload.items() if k in allowed}
 
 
-def _features_from_row(row: dict) -> dict:
-    return {
-        "Variant Type": row["variant_type"],
-        "Mechanism": row["mechanism"],
-        "Domain": row["domain"],
-        "Subtype": row["subtype"],
-        "In Poly A": row["in_poly_a"],
-        "Reported Clinical Severity": row["reported_clinical_severity"],
-        "exon_number": row["exon_number"],
-        "codon_number": row["codon_number"],
-        "is_intron": row["is_intron"],
-    }
-
-
 def _to_response(row: dict) -> PredictionResponse:
     return PredictionResponse(
         id=row["id"],
         patient_id=row["patient_id"],
+        prediction=row["prediction"],
+        risk=row["risk"],
         probability=row["probability"],
         risk_category=row["risk_category"],
         threshold=row["threshold"],
         model_version=row["model_version"],
+        feature_set=row["feature_set"],
         preprocessing_version=row["preprocessing_version"],
         created_at=row["created_at"],
+        features=row.get("features", {}),
+        mutation_label=row.get("mutation_label"),
         interpretation=ml.interpretation(
-            row["probability"], row["threshold"], row["risk_category"]
+            row["probability"],
+            row["threshold"],
+            row["risk_category"],
+            row["feature_set"],
         ),
     )

@@ -54,8 +54,25 @@ class Settings:
 
     database_path: str = os.getenv("DATABASE_PATH", str(REPO_ROOT / "hemophilia.db"))
 
+    # --- data + model -----------------------------------------------------
+    # Paths are configurable so the application works from any checkout. The
+    # ml package reads DATA_DIR / MMC2_PATH / MMC3_PATH directly; they are
+    # declared here so the whole configuration surface is visible in one place.
+    data_dir: str = os.getenv("DATA_DIR", str(REPO_ROOT / "ml" / "data"))
+    mmc2_path: str = os.getenv(
+        "MMC2_PATH",
+        str(REPO_ROOT / "ml" / "data" / "BVTH_VTH-2024-000215-mmc2.csv"),
+    )
+    mmc3_path: str = os.getenv(
+        "MMC3_PATH",
+        str(REPO_ROOT / "ml" / "data" / "BVTH_VTH-2024-000215-mmc3.csv"),
+    )
+
     artifacts_dir: str = os.getenv("ML_ARTIFACTS_DIR", str(REPO_ROOT / "ml" / "artifacts"))
-    model_version: str = os.getenv("ML_MODEL_VERSION", "champ-v1")
+    #: Which prediction mode the API serves when the caller does not choose one.
+    default_feature_set: str = os.getenv("ML_DEFAULT_FEATURE_SET", "merged")
+    #: Explicitly pinning a version overrides the feature-set routing entirely.
+    model_version: str = os.getenv("ML_MODEL_VERSION", "")
 
     bootstrap_admin_email: str = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "")
     bootstrap_admin_password: str = os.getenv("BOOTSTRAP_ADMIN_PASSWORD", "")
@@ -95,11 +112,35 @@ class Settings:
                 "CORS_ORIGINS contains '*', which browsers reject alongside "
                 "credentials. Set explicit origins."
             )
-        if self.model_version == "legacy-synthetic-v0":
+        if self.model_version:
+            # A positive check, not a blocklist: pinning anything other than a
+            # current MMC2/MMC3 artifact is almost always a stale value carried
+            # over from a previous deployment, and it silently disables mode
+            # routing. Naming the known-good versions means a new artifact has
+            # to be introduced deliberately rather than by typo.
+            from ml.inference import FEATURE_SET_VERSIONS
+
+            known = set(FEATURE_SET_VERSIONS.values())
+            if self.model_version not in known:
+                warnings.append(
+                    f"ML_MODEL_VERSION={self.model_version!r} is not one of the "
+                    f"MMC2/MMC3 artifacts ({', '.join(sorted(known))}). Leave it "
+                    "empty to serve every prediction mode."
+                )
+        if self.default_feature_set not in {"genomic", "clinical", "merged"}:
             warnings.append(
-                "ML_MODEL_VERSION is the legacy synthetic model, which was "
-                "trained on fabricated data and cannot be served."
+                f"ML_DEFAULT_FEATURE_SET={self.default_feature_set!r} is not one "
+                "of genomic, clinical, merged."
             )
+        for label, path in (
+            ("MMC2_PATH", self.mmc2_path),
+            ("MMC3_PATH", self.mmc3_path),
+        ):
+            if not Path(path).is_file():
+                warnings.append(
+                    f"{label} does not exist ({path}). Training and dataset "
+                    "validation will fail; serving a built model will not."
+                )
         return warnings
 
 

@@ -2,7 +2,8 @@
 
 ## synthetic_genomic.csv / synthetic_clinical.csv
 
-**Synthetic. 30 hand-written rows. Not clinical data, not patient data, not CHAMP.**
+**Synthetic. 30 hand-written rows. Not clinical data, not patient data, and not
+from any real dataset.**
 
 Formerly `genomic.csv` and `clinical.csv` at the repository root, where their names
 invited them to be mistaken for real inputs. They were the training data for
@@ -18,4 +19,5 @@ They are retained for exactly two reasons:
 2. Test fixtures — deterministic, tiny, and safe to assert against.
 
 They must never be loaded by application code. The authoritative dataset is
-`ml/data/champ.csv`.
+`ml/data/BVTH_VTH-2024-000215-mmc2.csv` + `ml/data/BVTH_VTH-2024-000215-mmc3.csv`,
+read only through `ml/preprocessing/hemophilia_a.py`.

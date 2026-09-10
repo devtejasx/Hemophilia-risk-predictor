@@ -19,9 +19,7 @@ const items: SidebarItem[] = [
 export const Sidebar: React.FC = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { sidebarOpen, user, signOut, theme, setTheme } = useAppStore()
-
-  if (!sidebarOpen) return null
+  const { user, signOut, theme, setTheme } = useAppStore()
 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
@@ -38,7 +36,7 @@ export const Sidebar: React.FC = () => {
               Inhibitor Risk
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              CHAMP research prototype
+              MMC2 + MMC3 research prototype
             </p>
           </div>
         </div>

@@ -53,7 +53,7 @@ const Login: React.FC = () => {
               Hemophilia Inhibitor-Risk
             </h1>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              CHAMP-based research prototype
+              MMC2 + MMC3 research prototype
             </p>
           </div>
         </div>

@@ -37,7 +37,9 @@ const Dashboard: React.FC = () => {
           {user ? `Welcome, ${user.full_name}` : 'Dashboard'}
         </h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Explainable Hemophilia A inhibitor-risk estimates from CHAMP genomic data.
+          Explainable Hemophilia A inhibitor-risk estimates. Genomic information
+          from MMC2 is fused with clinical information from MMC3 at the mutation
+          level, so an estimate describes a mutation rather than a person.
         </p>
       </div>
 
